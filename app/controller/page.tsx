@@ -46,6 +46,7 @@ export default function ControllerPage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+
     const roomFromUrl = params.get("room");
 
     if (roomFromUrl) {
@@ -175,8 +176,8 @@ export default function ControllerPage() {
 
     previousOrientationRef.current = current;
 
-    let dx = deltaYaw * SENSITIVITY;
-    let dy = deltaPitch * SENSITIVITY;
+    let dx = -deltaYaw * SENSITIVITY;
+    let dy = -deltaPitch * SENSITIVITY;
 
     if (Math.abs(dx) < DEAD_ZONE) {
       dx = 0;
