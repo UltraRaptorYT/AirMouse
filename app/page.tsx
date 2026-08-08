@@ -9,58 +9,220 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/lib/supabase/client";
 import { generateRoomCode, getRoomChannel } from "@/lib/realtime/room";
 
-type ConnectionStatus = "connecting" | "waiting" | "connected" | "error";
+type ConnectionStatus =
+  | "creating"
+  | "connecting"
+  | "waiting"
+  | "connected"
+  | "error";
+
+type CursorPosition = {
+  x: number;
+  y: number;
+};
 
 export default function Home() {
-  const [roomCode] = useState(() => generateRoomCode());
+  const [roomCode, setRoomCode] = useState("");
 
-  const [status, setStatus] = useState<ConnectionStatus>("connecting");
+  const [status, setStatus] = useState<ConnectionStatus>("creating");
 
-  const [lastAction, setLastAction] = useState<string>("Nothing yet");
+  const [lastAction, setLastAction] = useState("Nothing yet");
+
+  const [cursor, setCursor] = useState<CursorPosition>({
+    x: 0,
+    y: 0,
+  });
 
   const channelRef = useRef<RealtimeChannel | null>(null);
 
+  /**
+   * Generate the room code only after hydration.
+   *
+   * We DON'T do:
+   *
+   * useState(() => generateRoomCode())
+   *
+   * because generateRoomCode() uses Math.random(),
+   * which would create a different value on the
+   * server and client and cause hydration errors.
+   */
   useEffect(() => {
+    const code = generateRoomCode();
+
+    setRoomCode(code);
+
+    // Start cursor in centre of screen.
+    setCursor({
+      x: window.innerWidth / 2,
+      y: window.innerHeight / 2,
+    });
+  }, []);
+
+  /**
+   * Connect laptop to the Supabase room.
+   */
+  useEffect(() => {
+    if (!roomCode) {
+      return;
+    }
+
+    setStatus("connecting");
+
     const channel = getRoomChannel(roomCode);
 
     channelRef.current = channel;
 
     channel
-      .on("broadcast", { event: "controller-connected" }, () => {
-        console.log("Phone connected");
+      /**
+       * Phone joined.
+       */
+      .on(
+        "broadcast",
+        {
+          event: "controller-connected",
+        },
+        () => {
+          console.log("Controller connected");
 
-        setStatus("connected");
-        setLastAction("Phone connected");
-      })
-      .on("broadcast", { event: "controller-disconnected" }, () => {
-        setStatus("waiting");
-        setLastAction("Phone disconnected");
-      })
+          setStatus("connected");
+          setLastAction("Phone connected");
+        },
+      )
 
-      .on("broadcast", { event: "recenter" }, () => {
-        setLastAction("Recenter requested");
-      })
+      /**
+       * Phone disconnected.
+       */
+      .on(
+        "broadcast",
+        {
+          event: "controller-disconnected",
+        },
+        () => {
+          console.log("Controller disconnected");
 
-      .on("broadcast", { event: "left-click" }, () => {
-        console.log("Left click received");
+          setStatus("waiting");
+          setLastAction("Phone disconnected");
+        },
+      )
 
-        setLastAction("Left click");
-      })
+      /**
+       * Move virtual cursor.
+       *
+       * Phone sends:
+       *
+       * {
+       *   dx: 20,
+       *   dy: -10
+       * }
+       */
+      .on(
+        "broadcast",
+        {
+          event: "move",
+        },
+        ({ payload }) => {
+          const dx = Number(payload?.dx ?? 0);
+          const dy = Number(payload?.dy ?? 0);
 
-      .on("broadcast", { event: "right-click" }, () => {
-        console.log("Right click received");
+          setCursor((previous) => {
+            const nextX = previous.x + dx;
+            const nextY = previous.y + dy;
 
-        setLastAction("Right click");
-      })
+            return {
+              x: Math.max(0, Math.min(window.innerWidth, nextX)),
 
-      .on("broadcast", { event: "move" }, ({ payload }) => {
-        console.log("Move:", payload);
+              y: Math.max(0, Math.min(window.innerHeight, nextY)),
+            };
+          });
+        },
+      )
 
-        setLastAction(`Move ${payload.dx}, ${payload.dy}`);
-      })
+      /**
+       * Left click.
+       */
+      .on(
+        "broadcast",
+        {
+          event: "left-click",
+        },
+        () => {
+          setCursor((current) => {
+            const element = document.elementFromPoint(current.x, current.y);
 
+            if (element instanceof HTMLElement) {
+              console.log("Left click target:", element);
+
+              element.click();
+
+              setLastAction(`Left clicked ${element.tagName.toLowerCase()}`);
+            } else {
+              setLastAction("Left click");
+            }
+
+            return current;
+          });
+        },
+      )
+
+      /**
+       * Right click.
+       */
+      .on(
+        "broadcast",
+        {
+          event: "right-click",
+        },
+        () => {
+          setCursor((current) => {
+            const element = document.elementFromPoint(current.x, current.y);
+
+            if (element) {
+              const event = new MouseEvent("contextmenu", {
+                bubbles: true,
+                cancelable: true,
+
+                clientX: current.x,
+                clientY: current.y,
+
+                button: 2,
+                buttons: 2,
+              });
+
+              element.dispatchEvent(event);
+
+              console.log("Right click target:", element);
+            }
+
+            setLastAction("Right click");
+
+            return current;
+          });
+        },
+      )
+
+      /**
+       * Recenter virtual cursor.
+       */
+      .on(
+        "broadcast",
+        {
+          event: "recenter",
+        },
+        () => {
+          setCursor({
+            x: window.innerWidth / 2,
+            y: window.innerHeight / 2,
+          });
+
+          setLastAction("Cursor recentered");
+        },
+      )
+
+      /**
+       * Subscribe.
+       */
       .subscribe((subscriptionStatus) => {
-        console.log("Supabase status:", subscriptionStatus);
+        console.log("Supabase subscription:", subscriptionStatus);
 
         if (subscriptionStatus === "SUBSCRIBED") {
           setStatus("waiting");
@@ -74,88 +236,187 @@ export default function Home() {
         }
       });
 
+    /**
+     * Cleanup when component unmounts
+     * or roomCode changes.
+     */
     return () => {
       supabase.removeChannel(channel);
+
       channelRef.current = null;
     };
   }, [roomCode]);
 
+  /**
+   * Keep cursor inside the viewport
+   * when window gets resized.
+   */
+  useEffect(() => {
+    function handleResize() {
+      setCursor((previous) => ({
+        x: Math.min(previous.x, window.innerWidth),
+        y: Math.min(previous.y, window.innerHeight),
+      }));
+    }
+
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, []);
+
   return (
-    <main className="flex min-h-screen items-center justify-center bg-muted/30 p-6">
-      <div className="w-full max-w-xl space-y-6">
-        <div className="space-y-2 text-center">
-          <h1 className="text-4xl font-bold tracking-tight">Air Mouse</h1>
+    <>
+      <main className="flex min-h-dvh items-center justify-center bg-muted/30 p-6">
+        <div className="w-full max-w-xl space-y-6">
+          {/* Header */}
 
-          <p className="text-muted-foreground">
-            Control this screen using your phone.
-          </p>
-        </div>
+          <div className="space-y-2 text-center">
+            <h1 className="text-4xl font-bold tracking-tight">Air Mouse</h1>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Connect your phone</CardTitle>
-          </CardHeader>
+            <p className="text-muted-foreground">
+              Control this screen using your phone.
+            </p>
+          </div>
 
-          <CardContent className="space-y-6">
-            <div className="text-center">
-              <p className="mb-2 text-sm text-muted-foreground">Room code</p>
+          {/* Connection */}
 
-              <div className="font-mono text-5xl font-bold tracking-[0.25em]">
-                {roomCode}
+          <Card>
+            <CardHeader>
+              <CardTitle>Connect your phone</CardTitle>
+            </CardHeader>
+
+            <CardContent className="space-y-6">
+              {/* Room code */}
+
+              <div className="text-center">
+                <p className="mb-2 text-sm text-muted-foreground">Room code</p>
+
+                <div className="font-mono text-5xl font-bold tracking-[0.25em]">
+                  {roomCode || "------"}
+                </div>
               </div>
-            </div>
 
-            <div className="flex items-center justify-center gap-2">
-              <div
-                className={`size-3 rounded-full ${
-                  status === "connected"
-                    ? "bg-green-500"
-                    : status === "error"
-                      ? "bg-red-500"
-                      : "bg-yellow-500"
-                }`}
-              />
+              {/* Status */}
 
-              <span className="text-sm">
-                {status === "connecting" && "Connecting to Supabase..."}
+              <div className="flex items-center justify-center gap-2">
+                <div
+                  className={`size-3 rounded-full ${
+                    status === "connected"
+                      ? "bg-green-500"
+                      : status === "error"
+                        ? "bg-red-500"
+                        : "bg-yellow-500"
+                  }`}
+                />
 
-                {status === "waiting" && "Waiting for phone..."}
+                <span className="text-sm">
+                  {status === "creating" && "Creating room..."}
 
-                {status === "connected" && "Phone connected"}
+                  {status === "connecting" && "Connecting to Supabase..."}
 
-                {status === "error" && "Connection error"}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+                  {status === "waiting" && "Waiting for phone..."}
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Test events</CardTitle>
-          </CardHeader>
+                  {status === "connected" && "Phone connected"}
 
-          <CardContent className="space-y-4">
-            <div className="rounded-lg border bg-background p-4">
-              <p className="text-sm text-muted-foreground">Last action</p>
+                  {status === "error" && "Connection error"}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
 
-              <p className="mt-1 text-xl font-semibold">{lastAction}</p>
-            </div>
+          {/* Test area */}
 
-            <div className="grid grid-cols-2 gap-3">
-              <Button onClick={() => setLastAction("Button A clicked")}>
-                Button A
-              </Button>
+          <Card>
+            <CardHeader>
+              <CardTitle>Cursor test</CardTitle>
+            </CardHeader>
 
-              <Button
-                variant="secondary"
-                onClick={() => setLastAction("Button B clicked")}
-              >
-                Button B
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+            <CardContent className="space-y-4">
+              {/* Current action */}
+
+              <div className="rounded-lg border bg-background p-4">
+                <p className="text-sm text-muted-foreground">Last action</p>
+
+                <p className="mt-1 text-xl font-semibold">{lastAction}</p>
+
+                <div className="mt-3 flex gap-4 font-mono text-xs text-muted-foreground">
+                  <span>x: {Math.round(cursor.x)}</span>
+
+                  <span>y: {Math.round(cursor.y)}</span>
+                </div>
+              </div>
+
+              {/* Buttons for cursor clicking test */}
+
+              <div className="grid grid-cols-2 gap-3">
+                <Button
+                  className="h-16"
+                  onClick={() => {
+                    setLastAction("Button A clicked!");
+                  }}
+                >
+                  Button A
+                </Button>
+
+                <Button
+                  className="h-16"
+                  variant="secondary"
+                  onClick={() => {
+                    setLastAction("Button B clicked!");
+                  }}
+                >
+                  Button B
+                </Button>
+
+                <Button
+                  className="h-16"
+                  variant="outline"
+                  onClick={() => {
+                    setLastAction("Button C clicked!");
+                  }}
+                >
+                  Button C
+                </Button>
+
+                <Button
+                  className="h-16"
+                  variant="destructive"
+                  onClick={() => {
+                    setLastAction("Button D clicked!");
+                  }}
+                >
+                  Button D
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </main>
+
+      {/* Virtual cursor */}
+
+      <div
+        className="pointer-events-none fixed z-[999999]"
+        style={{
+          left: cursor.x,
+          top: cursor.y,
+
+          // Cursor hotspot is around top-left.
+          transform: "translate(-3px, -3px)",
+        }}
+      >
+        <div className="relative">
+          {/* Main cursor circle */}
+
+          <div className="size-6 rounded-full border-[3px] border-white bg-black shadow-lg" />
+
+          {/* Tiny centre point */}
+
+          <div className="absolute left-1/2 top-1/2 size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />
+        </div>
       </div>
-    </main>
+    </>
   );
 }

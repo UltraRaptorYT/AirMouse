@@ -19,16 +19,37 @@ export default function ControllerPage() {
 
   const channelRef = useRef<RealtimeChannel | null>(null);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+
+    const roomFromUrl = params.get("room");
+
+    if (roomFromUrl) {
+      setRoomCode(roomFromUrl.toUpperCase());
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
+    };
+  }, []);
+
   async function connectToRoom() {
     const code = roomCode.trim().toUpperCase();
 
-    if (!code) return;
+    if (!code) {
+      return;
+    }
 
     setRoomCode(code);
     setStatus("connecting");
 
     if (channelRef.current) {
       await supabase.removeChannel(channelRef.current);
+
       channelRef.current = null;
     }
 
@@ -58,20 +79,6 @@ export default function ControllerPage() {
     });
   }
 
-  async function sendEvent(event: string) {
-    const channel = channelRef.current;
-
-    if (!channel || status !== "connected") {
-      return;
-    }
-
-    await channel.send({
-      type: "broadcast",
-      event,
-      payload: {},
-    });
-  }
-
   async function disconnect() {
     const channel = channelRef.current;
 
@@ -86,27 +93,33 @@ export default function ControllerPage() {
     }
 
     channelRef.current = null;
+
     setStatus("idle");
   }
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const roomFromUrl = params.get("room");
+  async function sendEvent(
+    event: string,
+    payload: Record<string, unknown> = {},
+  ) {
+    const channel = channelRef.current;
 
-    if (roomFromUrl) {
-      setRoomCode(roomFromUrl.toUpperCase());
+    if (!channel || status !== "connected") {
+      return;
     }
-  }, []);
 
-  useEffect(() => {
-    return () => {
-      const channel = channelRef.current;
+    await channel.send({
+      type: "broadcast",
+      event,
+      payload,
+    });
+  }
 
-      if (channel) {
-        supabase.removeChannel(channel);
-      }
-    };
-  }, []);
+  async function move(dx: number, dy: number) {
+    await sendEvent("move", {
+      dx,
+      dy,
+    });
+  }
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-muted/30 p-4">
@@ -136,11 +149,11 @@ export default function ControllerPage() {
                 autoCapitalize="characters"
                 className="text-center font-mono text-xl uppercase tracking-widest"
                 disabled={status === "connected"}
-                onChange={(event) =>
+                onChange={(event) => {
                   setRoomCode(
                     event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""),
-                  )
-                }
+                  );
+                }}
               />
             </div>
 
@@ -163,38 +176,86 @@ export default function ControllerPage() {
         </Card>
 
         {status === "connected" && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Mouse controls</CardTitle>
-            </CardHeader>
+          <>
+            <Card>
+              <CardHeader>
+                <CardTitle>Pointer test</CardTitle>
+              </CardHeader>
 
-            <CardContent className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-3 gap-3">
+                  <div />
+
+                  <Button
+                    className="h-16 text-2xl"
+                    variant="outline"
+                    onClick={() => move(0, -40)}
+                  >
+                    ↑
+                  </Button>
+
+                  <div />
+
+                  <Button
+                    className="h-16 text-2xl"
+                    variant="outline"
+                    onClick={() => move(-40, 0)}
+                  >
+                    ←
+                  </Button>
+
+                  <Button
+                    className="h-16 text-2xl"
+                    variant="outline"
+                    onClick={() => move(0, 40)}
+                  >
+                    ↓
+                  </Button>
+
+                  <Button
+                    className="h-16 text-2xl"
+                    variant="outline"
+                    onClick={() => move(40, 0)}
+                  >
+                    →
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Mouse controls</CardTitle>
+              </CardHeader>
+
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <Button
+                    className="h-24 text-lg"
+                    onClick={() => sendEvent("left-click")}
+                  >
+                    Left Click
+                  </Button>
+
+                  <Button
+                    variant="secondary"
+                    className="h-24 text-lg"
+                    onClick={() => sendEvent("right-click")}
+                  >
+                    Right Click
+                  </Button>
+                </div>
+
                 <Button
-                  className="h-24 text-lg"
-                  onClick={() => sendEvent("left-click")}
+                  variant="outline"
+                  className="h-14 w-full"
+                  onClick={() => sendEvent("recenter")}
                 >
-                  Left Click
+                  Recenter
                 </Button>
-
-                <Button
-                  variant="secondary"
-                  className="h-24 text-lg"
-                  onClick={() => sendEvent("right-click")}
-                >
-                  Right Click
-                </Button>
-              </div>
-
-              <Button
-                variant="outline"
-                className="h-14 w-full"
-                onClick={() => sendEvent("recenter")}
-              >
-                Recenter
-              </Button>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </>
         )}
       </div>
     </main>
