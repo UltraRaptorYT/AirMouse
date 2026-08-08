@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
+import { QRCodeSVG } from "qrcode.react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,6 +26,7 @@ export default function ScreenPage() {
   const [roomCode, setRoomCode] = useState("");
 
   const [status, setStatus] = useState<ConnectionStatus>("creating");
+  const [controllerUrl, setControllerUrl] = useState("");
 
   const [lastAction, setLastAction] = useState("Nothing yet");
 
@@ -43,12 +45,16 @@ export default function ScreenPage() {
    * on the server and browser.
    */
   useEffect(() => {
-    setRoomCode(generateRoomCode());
+    const code = generateRoomCode();
+
+    setRoomCode(code);
 
     setCursor({
       x: window.innerWidth / 2,
       y: window.innerHeight / 2,
     });
+
+    setControllerUrl(`${window.location.origin}/controller?room=${code}`);
   }, []);
 
   /*
@@ -277,11 +283,21 @@ export default function ScreenPage() {
             </CardHeader>
 
             <CardContent className="space-y-6">
-              <div className="text-center">
-                <p className="mb-2 text-sm text-muted-foreground">Room code</p>
+              <div className="flex flex-col items-center gap-5">
+                {controllerUrl && (
+                  <div className="rounded-xl bg-white p-4 shadow-sm">
+                    <QRCodeSVG value={controllerUrl} size={200} level="M" />
+                  </div>
+                )}
 
-                <div className="font-mono text-5xl font-bold tracking-[0.25em]">
-                  {roomCode || "------"}
+                <div className="text-center">
+                  <p className="mb-2 text-sm text-muted-foreground">
+                    Scan QR code or enter room code
+                  </p>
+
+                  <div className="font-mono text-5xl font-bold tracking-[0.25em]">
+                    {roomCode || "------"}
+                  </div>
                 </div>
               </div>
 
@@ -298,13 +314,9 @@ export default function ScreenPage() {
 
                 <span className="text-sm">
                   {status === "creating" && "Creating room..."}
-
                   {status === "connecting" && "Connecting..."}
-
                   {status === "waiting" && "Waiting for phone..."}
-
                   {status === "connected" && "Phone connected"}
-
                   {status === "error" && "Connection error"}
                 </span>
               </div>
