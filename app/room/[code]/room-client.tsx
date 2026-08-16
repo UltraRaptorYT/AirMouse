@@ -1,48 +1,46 @@
 "use client";
 
-import {
-  useEffect,
-  useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent,
-} from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import {
   ArrowRight,
   Check,
   CircleAlert,
+  Crosshair,
   Gamepad2,
-  GripVertical,
+  Hand,
   LoaderCircle,
-  PartyPopper,
-  RotateCcw,
+  Move3d,
+  Pause,
+  Smartphone,
   Sparkles,
   Trophy,
   UserRound,
   Wifi,
+  X,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getRoomChannel } from "@/lib/realtime/room";
 import type {
-  AnswerResultPayload,
+  DropResultPayload,
   GameStatePayload,
 } from "@/lib/realtime/types";
 import { supabase } from "@/lib/supabase/client";
 
 type ConnectionStatus = "connecting" | "connected" | "error";
-
-type DragState = {
-  answerId: string;
-  x: number;
-  y: number;
-  startX: number;
-  startY: number;
-  moved: boolean;
+type SensorStatus = "idle" | "requesting" | "active" | "denied" | "unsupported";
+type OrientationReading = { alpha: number; beta: number };
+type PermissionCapableEvent = {
+  requestPermission?: () => Promise<"granted" | "denied">;
 };
 
 const PLAYER_COLORS = ["#ff6b4a", "#5c7cfa", "#15a97b", "#b259e8", "#d89b22"];
+const ORIENTATION_SENSITIVITY = 5;
+const ACCELERATION_SENSITIVITY = 0.45;
+const SEND_INTERVAL_MS = 32;
+const DEAD_ZONE = 0.08;
 
 function makePlayerId(roomCode: string) {
   const storageKey = `airmouse-player-${roomCode}`;
@@ -59,6 +57,13 @@ function hasHost(channel: RealtimeChannel) {
     .some((presence) => presence.kind === "host");
 }
 
+function normalizeAngleDelta(current: number, previous: number) {
+  let delta = current - previous;
+  if (delta > 180) delta -= 360;
+  if (delta < -180) delta += 360;
+  return delta;
+}
+
 export default function RoomClient({ roomCode }: { roomCode: string }) {
   const [status, setStatus] = useState<ConnectionStatus>(
     roomCode ? "connecting" : "error",
@@ -68,21 +73,27 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   const [joined, setJoined] = useState(false);
   const [playerId, setPlayerId] = useState("");
   const [playerColor, setPlayerColor] = useState(PLAYER_COLORS[0]);
+  const [sensorStatus, setSensorStatus] = useState<SensorStatus>("idle");
+  const [isHolding, setIsHolding] = useState(false);
+  const [totalScore, setTotalScore] = useState(0);
+  const [feedback, setFeedback] = useState<{
+    correct: boolean;
+    message: string;
+  } | null>(null);
+  const [roundComplete, setRoundComplete] = useState(false);
   const [gameState, setGameState] = useState<GameStatePayload>({
     phase: "lobby",
     questionIndex: 0,
     questionCount: 0,
   });
-  const [placements, setPlacements] = useState<Record<string, string>>({});
-  const [selectedAnswerId, setSelectedAnswerId] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState(false);
-  const [result, setResult] = useState<AnswerResultPayload | null>(null);
-  const [totalScore, setTotalScore] = useState(0);
-  const [dragState, setDragState] = useState<DragState | null>(null);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const previousOrientationRef = useRef<OrientationReading | null>(null);
+  const lastOrientationAtRef = useRef(0);
+  const movementBufferRef = useRef({ dx: 0, dy: 0 });
+  const lastSentAtRef = useRef(0);
+  const holdingRef = useRef(false);
   const currentQuestionIdRef = useRef<string | undefined>(undefined);
-  const dragRef = useRef<DragState | null>(null);
 
   useEffect(() => {
     if (!roomCode) return;
@@ -112,21 +123,28 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
         if (nextQuestionId !== currentQuestionIdRef.current) {
           currentQuestionIdRef.current = nextQuestionId;
-          setPlacements({});
-          setSelectedAnswerId(null);
-          setSubmitted(false);
-          setResult(null);
+          holdingRef.current = false;
+          setIsHolding(false);
+          setFeedback(null);
+          setRoundComplete(false);
         }
 
         setGameState(nextState);
       })
-      .on("broadcast", { event: "answer-result" }, ({ payload }) => {
-        const answerResult = payload as AnswerResultPayload;
+      .on("broadcast", { event: "drop-result" }, ({ payload }) => {
+        const result = payload as DropResultPayload;
+        if (result.playerId !== id) return;
 
-        if (answerResult.playerId !== id) return;
-
-        setResult(answerResult);
-        setTotalScore(answerResult.totalScore);
+        setTotalScore(result.totalScore);
+        setFeedback({
+          correct: result.correct,
+          message: result.correct
+            ? `Correct box! +${result.points} points`
+            : "Not that box — try again",
+        });
+      })
+      .on("broadcast", { event: "round-complete" }, () => {
+        setRoundComplete(true);
       })
       .subscribe((subscriptionStatus) => {
         if (subscriptionStatus === "SUBSCRIBED") {
@@ -153,11 +171,86 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     };
   }, [roomCode]);
 
+  useEffect(() => {
+    if (sensorStatus !== "active" || !playerId) return;
+
+    function sendBufferedMovement() {
+      const now = performance.now();
+      if (now - lastSentAtRef.current < SEND_INTERVAL_MS) return;
+
+      const { dx, dy } = movementBufferRef.current;
+      movementBufferRef.current = { dx: 0, dy: 0 };
+      lastSentAtRef.current = now;
+
+      if (Math.abs(dx) < DEAD_ZONE && Math.abs(dy) < DEAD_ZONE) return;
+
+      void channelRef.current?.send({
+        type: "broadcast",
+        event: "cursor-move",
+        payload: { playerId, dx, dy },
+      });
+    }
+
+    function addMovement(dx: number, dy: number) {
+      movementBufferRef.current.dx += dx;
+      movementBufferRef.current.dy += dy;
+      sendBufferedMovement();
+    }
+
+    function handleOrientation(event: DeviceOrientationEvent) {
+      const current = {
+        alpha: event.alpha ?? 0,
+        beta: event.beta ?? 0,
+      };
+      const previous = previousOrientationRef.current;
+      previousOrientationRef.current = current;
+      lastOrientationAtRef.current = performance.now();
+
+      if (!previous) return;
+
+      addMovement(
+        -normalizeAngleDelta(current.alpha, previous.alpha) * ORIENTATION_SENSITIVITY,
+        -(current.beta - previous.beta) * ORIENTATION_SENSITIVITY,
+      );
+    }
+
+    function handleMotion(event: DeviceMotionEvent) {
+      const acceleration = event.acceleration;
+      let dx = (acceleration?.x ?? 0) * ACCELERATION_SENSITIVITY;
+      let dy = -(acceleration?.y ?? 0) * ACCELERATION_SENSITIVITY;
+
+      if (performance.now() - lastOrientationAtRef.current > 250) {
+        dx += -(event.rotationRate?.beta ?? 0) * 0.08;
+        dy += -(event.rotationRate?.gamma ?? 0) * 0.08;
+      }
+
+      addMovement(dx, dy);
+    }
+
+    window.addEventListener("deviceorientation", handleOrientation);
+    window.addEventListener("devicemotion", handleMotion);
+
+    return () => {
+      window.removeEventListener("deviceorientation", handleOrientation);
+      window.removeEventListener("devicemotion", handleMotion);
+      previousOrientationRef.current = null;
+      movementBufferRef.current = { dx: 0, dy: 0 };
+    };
+  }, [sensorStatus, playerId]);
+
   async function joinRoom() {
     const cleanName = nickname.trim().replace(/\s+/g, " ").slice(0, 18);
     const channel = channelRef.current;
 
-    if (!cleanName || !channel || status !== "connected" || !hostOnline) return;
+    if (
+      !cleanName ||
+      !playerId ||
+      !channel ||
+      status !== "connected" ||
+      !hostOnline
+    ) {
+      return;
+    }
 
     setNickname(cleanName);
     localStorage.setItem("airmouse-nickname", cleanName);
@@ -167,11 +260,11 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
       playerId,
       name: cleanName,
       color: playerColor,
+      motionEnabled: false,
       onlineAt: new Date().toISOString(),
     });
 
     setJoined(true);
-
     await channel.send({
       type: "broadcast",
       event: "request-game-state",
@@ -179,94 +272,100 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     });
   }
 
-  function placeAnswer(answerId: string, targetId: string) {
-    if (submitted) return;
-    setPlacements((current) => ({ ...current, [answerId]: targetId }));
-    setSelectedAnswerId(null);
+  async function enableMotion() {
+    if (
+      typeof DeviceOrientationEvent === "undefined" &&
+      typeof DeviceMotionEvent === "undefined"
+    ) {
+      setSensorStatus("unsupported");
+      return;
+    }
+
+    setSensorStatus("requesting");
+
+    try {
+      const permissionRequests: Array<Promise<"granted" | "denied">> = [];
+
+      if (typeof DeviceOrientationEvent !== "undefined") {
+        const orientationEvent =
+          DeviceOrientationEvent as unknown as PermissionCapableEvent;
+        if (typeof orientationEvent.requestPermission === "function") {
+          permissionRequests.push(orientationEvent.requestPermission());
+        }
+      }
+      if (typeof DeviceMotionEvent !== "undefined") {
+        const motionEvent = DeviceMotionEvent as unknown as PermissionCapableEvent;
+        if (typeof motionEvent.requestPermission === "function") {
+          permissionRequests.push(motionEvent.requestPermission());
+        }
+      }
+
+      const permissions = await Promise.all(permissionRequests);
+      if (permissions.some((permission) => permission !== "granted")) {
+        setSensorStatus("denied");
+        return;
+      }
+
+      previousOrientationRef.current = null;
+      setSensorStatus("active");
+
+      await channelRef.current?.track({
+        kind: "player",
+        playerId,
+        name: nickname,
+        color: playerColor,
+        motionEnabled: true,
+        onlineAt: new Date().toISOString(),
+      });
+    } catch {
+      setSensorStatus("denied");
+    }
   }
 
-  function returnAnswer(answerId: string) {
-    if (submitted) return;
-    setPlacements((current) => {
-      const next = { ...current };
-      delete next[answerId];
-      return next;
+  async function pauseMotion() {
+    releaseGrab();
+    setSensorStatus("idle");
+    previousOrientationRef.current = null;
+
+    await channelRef.current?.track({
+      kind: "player",
+      playerId,
+      name: nickname,
+      color: playerColor,
+      motionEnabled: false,
+      onlineAt: new Date().toISOString(),
     });
   }
 
-  function startDrag(
-    answerId: string,
-    event: ReactPointerEvent<HTMLButtonElement>,
-  ) {
-    if (submitted) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-
-    const nextDrag = {
-      answerId,
-      x: event.clientX,
-      y: event.clientY,
-      startX: event.clientX,
-      startY: event.clientY,
-      moved: false,
-    };
-    dragRef.current = nextDrag;
-    setDragState(nextDrag);
-  }
-
-  function moveDrag(event: ReactPointerEvent<HTMLButtonElement>) {
-    const current = dragRef.current;
-    if (!current) return;
-
-    const moved =
-      current.moved ||
-      Math.hypot(event.clientX - current.startX, event.clientY - current.startY) > 6;
-    const nextDrag = { ...current, x: event.clientX, y: event.clientY, moved };
-    dragRef.current = nextDrag;
-    setDragState(nextDrag);
-  }
-
-  function endDrag(event: ReactPointerEvent<HTMLButtonElement>) {
-    const current = dragRef.current;
-    if (!current) return;
-
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-
-    const target = document
-      .elementFromPoint(event.clientX, event.clientY)
-      ?.closest<HTMLElement>("[data-answer-target]");
-
-    if (current.moved && target?.dataset.answerTarget) {
-      placeAnswer(current.answerId, target.dataset.answerTarget);
-    } else if (!current.moved) {
-      setSelectedAnswerId((selected) =>
-        selected === current.answerId ? null : current.answerId,
-      );
-    }
-
-    dragRef.current = null;
-    setDragState(null);
-  }
-
-  async function submitAnswers() {
-    const question = gameState.question;
-    const channel = channelRef.current;
-
-    if (!question || !channel || submitted) return;
-    if (Object.keys(placements).length !== question.answers.length) return;
-
-    setSubmitted(true);
-    await channel.send({
+  function recenter() {
+    previousOrientationRef.current = null;
+    void channelRef.current?.send({
       type: "broadcast",
-      event: "answer-submitted",
-      payload: {
-        playerId,
-        playerName: nickname,
-        questionId: question.id,
-        placements,
-        elapsedMs: Math.max(0, Date.now() - (gameState.startedAt ?? Date.now())),
-      },
+      event: "recenter",
+      payload: { playerId },
+    });
+  }
+
+  function startGrab() {
+    if (holdingRef.current || sensorStatus !== "active") return;
+    holdingRef.current = true;
+    setIsHolding(true);
+    setFeedback(null);
+    void channelRef.current?.send({
+      type: "broadcast",
+      event: "pointer-down",
+      payload: { playerId },
+    });
+  }
+
+  function releaseGrab() {
+    if (!holdingRef.current) return;
+    holdingRef.current = false;
+    setIsHolding(false);
+    void channelRef.current?.send({
+      type: "broadcast",
+      event: "pointer-up",
+      payload: { playerId },
     });
   }
 
@@ -313,7 +412,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
             <Button
               className="mt-4 h-14 w-full rounded-2xl bg-[#171922] text-base font-bold text-white hover:bg-[#252835]"
-              disabled={!nickname.trim() || !hostOnline || status !== "connected"}
+              disabled={!nickname.trim() || !playerId || !hostOnline || status !== "connected"}
               onClick={() => void joinRoom()}
             >
               Join room
@@ -333,7 +432,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
             <Trophy className="size-9" />
           </div>
           <span className="player-eyebrow mt-7">Game complete</span>
-          <h1 className="mt-3 text-5xl font-black tracking-[-.05em]">Nice sorting!</h1>
+          <h1 className="mt-3 text-5xl font-black tracking-[-.05em]">Nice flying!</h1>
           <p className="mt-4 text-[#6b6e78]">Look at the host screen for the final leaderboard.</p>
           <div className="mt-8 rounded-2xl border border-black/8 bg-white px-8 py-5 shadow-sm">
             <p className="text-xs font-bold uppercase tracking-[.18em] text-[#9a9ca3]">Your score</p>
@@ -347,7 +446,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   if (gameState.phase === "lobby") {
     return (
       <PhoneShell roomCode={roomCode} status={status} score={totalScore}>
-        <div className="flex flex-1 flex-col items-center justify-center py-12 text-center">
+        <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
           <div
             className="flex size-20 items-center justify-center rounded-[1.7rem] text-3xl font-black text-white shadow-[0_18px_50px_rgba(0,0,0,.12)]"
             style={{ backgroundColor: playerColor }}
@@ -356,10 +455,19 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           </div>
           <span className="player-eyebrow mt-7">You&apos;re in</span>
           <h1 className="mt-3 text-4xl font-black tracking-[-.04em]">Hey, {nickname}!</h1>
-          <p className="mt-3 max-w-xs text-[#696c76]">The host will start when everyone has joined.</p>
-          <div className="mt-8 flex items-center gap-2 rounded-full border border-black/8 bg-white px-4 py-2.5 text-sm font-semibold shadow-sm">
+          <p className="mt-3 max-w-xs text-[#696c76]">
+            Enable motion now, then keep this phone pointed at the host screen.
+          </p>
+
+          <MotionButton
+            sensorStatus={sensorStatus}
+            onEnable={() => void enableMotion()}
+            onPause={() => void pauseMotion()}
+          />
+
+          <div className="mt-5 flex items-center gap-2 rounded-full border border-black/8 bg-white px-4 py-2.5 text-sm font-semibold shadow-sm">
             <LoaderCircle className="size-4 animate-spin text-[#ff6b4a]" />
-            Waiting in the lobby
+            Waiting for the host
           </div>
         </div>
       </PhoneShell>
@@ -371,10 +479,13 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
   return (
     <PhoneShell roomCode={roomCode} status={status} score={totalScore}>
-      <div className="pb-8 pt-5">
+      <div className="flex flex-1 flex-col pb-6 pt-5">
         <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[.15em] text-[#90929a]">
           <span>Question {gameState.questionIndex + 1}/{gameState.questionCount}</span>
-          <span>{Object.keys(placements).length}/{question.answers.length} placed</span>
+          <span className="flex items-center gap-1.5">
+            <span className={`size-2 rounded-full ${sensorStatus === "active" ? "bg-[#15a97b]" : "bg-amber-500"}`} />
+            {sensorStatus === "active" ? "Motion live" : "Motion off"}
+          </span>
         </div>
         <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/8">
           <div
@@ -383,143 +494,152 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           />
         </div>
 
-        <h1 className="mt-7 text-balance text-3xl font-black leading-[1.04] tracking-[-.04em]">
+        <h1 className="mt-6 text-balance text-2xl font-black leading-[1.04] tracking-[-.04em]">
           {question.prompt}
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-[#6d707a]">
-          Drag a card to a box, or tap a card then tap a box.
+          Watch the shared screen. Tilt your phone to steer your colored cursor.
         </p>
 
-        <div className={`mt-6 grid gap-3 ${question.targets.length === 3 ? "grid-cols-1" : "grid-cols-2"}`}>
-          {question.targets.map((target, index) => {
-            const placedAnswers = question.answers.filter(
-              (answer) => placements[answer.id] === target.id,
-            );
-
-            return (
-              <div
-                key={target.id}
-                data-answer-target={target.id}
-                role="button"
-                tabIndex={submitted ? -1 : 0}
-                aria-disabled={submitted}
-                className={`min-h-36 rounded-[1.4rem] border-2 p-3.5 text-left transition ${
-                  selectedAnswerId
-                    ? "border-[#ff6b4a]/55 bg-[#ff6b4a]/5"
-                    : "border-dashed border-black/12 bg-white/55"
-                }`}
-                onClick={() => {
-                  if (selectedAnswerId) placeAnswer(selectedAnswerId, target.id);
-                }}
-                onKeyDown={(event) => {
-                  if ((event.key === "Enter" || event.key === " ") && selectedAnswerId) {
-                    event.preventDefault();
-                    placeAnswer(selectedAnswerId, target.id);
-                  }
-                }}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-black">{target.label}</p>
-                    <p className="mt-0.5 text-[11px] leading-tight text-[#92949b]">{target.hint}</p>
-                  </div>
-                  <span className="flex size-7 items-center justify-center rounded-lg bg-black/[.045] text-xs font-black text-black/30">
-                    {index + 1}
-                  </span>
-                </div>
-
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {placedAnswers.map((answer) => (
-                    <span
-                      key={answer.id}
-                      className="inline-flex items-center gap-1 rounded-lg bg-[#171922] px-2.5 py-2 text-xs font-bold text-white"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        returnAnswer(answer.id);
-                      }}
-                    >
-                      {answer.label}
-                      {!submitted && <RotateCcw className="size-3 text-white/45" />}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="mt-5">
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-xs font-bold uppercase tracking-[.16em] text-[#8a8c94]">Answer cards</p>
-            {selectedAnswerId && <p className="text-xs font-semibold text-[#e55538]">Now tap a box ↑</p>}
-          </div>
-          <div className="grid grid-cols-2 gap-2.5">
-            {question.answers
-              .filter((answer) => !placements[answer.id])
-              .map((answer) => (
-                <button
-                  type="button"
-                  key={answer.id}
-                  disabled={submitted}
-                  className={`flex min-h-14 touch-none select-none items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm font-bold shadow-sm transition active:scale-[.98] ${
-                    selectedAnswerId === answer.id
-                      ? "border-[#ff6b4a] bg-[#fff1ec] ring-4 ring-[#ff6b4a]/10"
-                      : "border-black/8 bg-white"
-                  }`}
-                  onPointerDown={(event) => startDrag(answer.id, event)}
-                  onPointerMove={moveDrag}
-                  onPointerUp={endDrag}
-                  onPointerCancel={() => {
-                    dragRef.current = null;
-                    setDragState(null);
-                  }}
-                >
-                  <GripVertical className="size-4 shrink-0 text-[#b0b1b6]" />
-                  {answer.label}
-                </button>
-              ))}
-          </div>
-        </div>
-
-        {result ? (
-          <div className={`mt-5 rounded-[1.4rem] p-4 ${result.correctCount === result.answerCount ? "bg-[#e4f8ef] text-[#087653]" : "bg-[#fff1cf] text-[#805c08]"}`}>
-            <div className="flex items-center gap-3">
-              {result.correctCount === result.answerCount ? <PartyPopper className="size-6" /> : <Sparkles className="size-6" />}
-              <div className="flex-1">
-                <p className="font-black">
-                  {result.correctCount === result.answerCount ? "Perfect sort!" : `${result.correctCount} of ${result.answerCount} correct`}
-                </p>
-                <p className="text-sm opacity-75">+{result.points.toLocaleString()} points</p>
-              </div>
-              <Check className="size-5" />
-            </div>
-          </div>
-        ) : submitted ? (
-          <div className="mt-5 flex h-14 items-center justify-center gap-2 rounded-2xl bg-[#171922] font-bold text-white">
-            <LoaderCircle className="size-4 animate-spin" />
-            Checking your sort…
+        {sensorStatus !== "active" ? (
+          <div className="my-7 rounded-[1.6rem] border border-black/8 bg-white p-5 text-center shadow-sm">
+            <Smartphone className="mx-auto size-9 text-[#ff6b4a]" />
+            <p className="mt-3 font-black">Motion control is paused</p>
+            <p className="mt-1 text-sm text-[#777a83]">Your browser needs sensor access to move the AirMouse.</p>
+            <MotionButton
+              sensorStatus={sensorStatus}
+              onEnable={() => void enableMotion()}
+              onPause={() => void pauseMotion()}
+            />
           </div>
         ) : (
-          <Button
-            className="mt-5 h-14 w-full rounded-2xl bg-[#ff6b4a] text-base font-black text-white shadow-[0_12px_28px_rgba(255,107,74,.22)] hover:bg-[#f45f40]"
-            disabled={Object.keys(placements).length !== question.answers.length}
-            onClick={() => void submitAnswers()}
-          >
-            Lock in answers
-            <Check className="ml-1 size-5" />
-          </Button>
+          <div className="my-6 flex flex-1 flex-col">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-2xl border border-black/8 bg-white/70 p-4">
+                <Move3d className="size-5 text-[#5c7cfa]" />
+                <p className="mt-3 text-sm font-black">Tilt to move</p>
+                <p className="mt-1 text-xs leading-relaxed text-[#858790]">Gyroscope + acceleration</p>
+              </div>
+              <button
+                type="button"
+                className="rounded-2xl border border-black/8 bg-white/70 p-4 text-left active:scale-[.98]"
+                onClick={recenter}
+              >
+                <Crosshair className="size-5 text-[#15a97b]" />
+                <p className="mt-3 text-sm font-black">Recenter</p>
+                <p className="mt-1 text-xs leading-relaxed text-[#858790]">Reset cursor position</p>
+              </button>
+            </div>
+
+            <div className="flex flex-1 items-center justify-center py-6">
+              <button
+                type="button"
+                aria-label="Hold to grab an answer card and release to drop it"
+                className={`flex aspect-square w-full max-w-[260px] touch-none select-none flex-col items-center justify-center rounded-full border-[10px] font-black shadow-[0_24px_60px_rgba(23,25,34,.18)] transition active:scale-[.97] ${
+                  isHolding
+                    ? "border-[#ffb29f] bg-[#ff6b4a] text-white"
+                    : "border-white bg-[#171922] text-white"
+                }`}
+                onPointerDown={(event) => {
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  startGrab();
+                }}
+                onPointerUp={(event) => {
+                  if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                    event.currentTarget.releasePointerCapture(event.pointerId);
+                  }
+                  releaseGrab();
+                }}
+                onPointerCancel={releaseGrab}
+                onKeyDown={(event) => {
+                  if ((event.key === " " || event.key === "Enter") && !event.repeat) {
+                    event.preventDefault();
+                    startGrab();
+                  }
+                }}
+                onKeyUp={(event) => {
+                  if (event.key === " " || event.key === "Enter") releaseGrab();
+                }}
+              >
+                <Hand className={`size-14 ${isHolding ? "fill-white/20" : ""}`} />
+                <span className="mt-3 text-xl">{isHolding ? "Release to drop" : "Hold to grab"}</span>
+                <span className="mt-1 text-xs font-semibold opacity-50">Watch your cursor on screen</span>
+              </button>
+            </div>
+
+            <Button
+              variant="outline"
+              className="h-11 rounded-xl border-black/10 bg-transparent text-[#686b75]"
+              onClick={() => void pauseMotion()}
+            >
+              <Pause className="mr-1 size-4" /> Pause motion
+            </Button>
+          </div>
+        )}
+
+        {feedback && (
+          <div className={`rounded-2xl p-4 ${feedback.correct ? "bg-[#e4f8ef] text-[#087653]" : "bg-[#fff0ec] text-[#b43c25]"}`}>
+            <div className="flex items-center gap-3">
+              {feedback.correct ? <Check className="size-5" /> : <X className="size-5" />}
+              <p className="font-black">{feedback.message}</p>
+            </div>
+          </div>
+        )}
+
+        {roundComplete && (
+          <div className="mt-3 flex items-center gap-3 rounded-2xl bg-[#fff4cf] p-4 text-[#755509]">
+            <Sparkles className="size-5" />
+            <p className="font-black">Round complete! Look at the host screen.</p>
+          </div>
         )}
       </div>
-
-      {dragState?.moved && (
-        <div
-          className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-1/2 rounded-xl bg-[#171922] px-4 py-3 text-sm font-bold text-white shadow-2xl"
-          style={{ left: dragState.x, top: dragState.y }}
-        >
-          {question.answers.find((answer) => answer.id === dragState.answerId)?.label}
-        </div>
-      )}
     </PhoneShell>
+  );
+}
+
+function MotionButton({
+  sensorStatus,
+  onEnable,
+  onPause,
+}: {
+  sensorStatus: SensorStatus;
+  onEnable: () => void;
+  onPause: () => void;
+}) {
+  if (sensorStatus === "active") {
+    return (
+      <Button
+        variant="outline"
+        className="mt-7 h-14 rounded-2xl border-[#15a97b]/25 bg-[#e4f8ef] font-black text-[#087653] hover:bg-[#d9f3e9]"
+        onClick={onPause}
+      >
+        <Check className="mr-1 size-5" /> Motion ready
+      </Button>
+    );
+  }
+
+  return (
+    <div className="mt-7 w-full max-w-sm">
+      <Button
+        className="h-14 w-full rounded-2xl bg-[#171922] text-base font-black text-white hover:bg-[#252835]"
+        disabled={sensorStatus === "requesting"}
+        onClick={onEnable}
+      >
+        {sensorStatus === "requesting" ? (
+          <LoaderCircle className="mr-1 size-5 animate-spin" />
+        ) : (
+          <Move3d className="mr-1 size-5" />
+        )}
+        {sensorStatus === "requesting" ? "Requesting access…" : "Enable AirMouse motion"}
+      </Button>
+      {(sensorStatus === "denied" || sensorStatus === "unsupported") && (
+        <p className="mt-2 text-xs font-semibold text-red-600">
+          {sensorStatus === "denied"
+            ? "Motion access was denied. Allow Motion & Orientation in your browser settings."
+            : "This browser does not expose motion sensors. Try Safari or Chrome on your phone."}
+        </p>
+      )}
+    </div>
   );
 }
 

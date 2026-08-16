@@ -5,7 +5,6 @@ export function getRoomChannel(roomCode: string, presenceKey?: string) {
     config: {
       broadcast: {
         self: false,
-        ack: true,
       },
       ...(presenceKey ? { presence: { key: presenceKey } } : {}),
     },

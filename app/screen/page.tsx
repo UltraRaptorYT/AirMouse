@@ -16,6 +16,7 @@ import {
   Trophy,
   Users,
   WifiOff,
+  MousePointer2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -27,10 +28,11 @@ import {
 import { supabase } from "@/lib/supabase/client";
 import { generateRoomCode, getRoomChannel } from "@/lib/realtime/room";
 import type {
-  AnswerResultPayload,
-  AnswerSubmissionPayload,
+  CursorMovePayload,
+  DropResultPayload,
   GameStatePayload,
   PlayerPresence,
+  PointerActionPayload,
 } from "@/lib/realtime/types";
 
 type ConnectionStatus = "connecting" | "ready" | "error";
@@ -38,9 +40,13 @@ type ConnectionStatus = "connecting" | "ready" | "error";
 type ScoreEntry = {
   name: string;
   score: number;
-  answered: boolean;
-  correctCount?: number;
-  answerCount?: number;
+};
+
+type CursorPosition = { x: number; y: number };
+
+type SolvedAnswer = {
+  targetId: string;
+  playerId: string;
 };
 
 const FALLBACK_COLOR = "#ff6b4a";
@@ -63,6 +69,12 @@ export default function ScreenPage() {
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [players, setPlayers] = useState<PlayerPresence[]>([]);
   const [scores, setScores] = useState<Record<string, ScoreEntry>>({});
+  const [cursors, setCursors] = useState<Record<string, CursorPosition>>({});
+  const [dragging, setDragging] = useState<Record<string, string>>({});
+  const [solvedAnswers, setSolvedAnswers] = useState<
+    Record<string, SolvedAnswer>
+  >({});
+  const [lastActions, setLastActions] = useState<Record<string, string>>({});
   const [gameState, setGameState] = useState<GameStatePayload>({
     phase: "lobby",
     questionIndex: 0,
@@ -72,7 +84,10 @@ export default function ScreenPage() {
   const channelRef = useRef<RealtimeChannel | null>(null);
   const gameStateRef = useRef(gameState);
   const scoresRef = useRef(scores);
-  const processedRef = useRef(new Map<string, Set<string>>());
+  const playersRef = useRef(players);
+  const cursorsRef = useRef(cursors);
+  const draggingRef = useRef(dragging);
+  const solvedAnswersRef = useRef(solvedAnswers);
 
   useEffect(() => {
     gameStateRef.current = gameState;
@@ -81,6 +96,10 @@ export default function ScreenPage() {
   useEffect(() => {
     scoresRef.current = scores;
   }, [scores]);
+
+  useEffect(() => {
+    playersRef.current = players;
+  }, [players]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -101,7 +120,33 @@ export default function ScreenPage() {
 
     channel
       .on("presence", { event: "sync" }, () => {
-        setPlayers(getPlayers(channel));
+        const nextPlayers = getPlayers(channel);
+        const onlineIds = new Set(nextPlayers.map((player) => player.playerId));
+
+        playersRef.current = nextPlayers;
+        setPlayers(nextPlayers);
+        const nextDragging = Object.fromEntries(
+          Object.entries(draggingRef.current).filter(([playerId]) =>
+            onlineIds.has(playerId),
+          ),
+        );
+        draggingRef.current = nextDragging;
+        setDragging(nextDragging);
+        setCursors((current) => {
+          const next = Object.fromEntries(
+            Object.entries(current).filter(([playerId]) => onlineIds.has(playerId)),
+          );
+
+          nextPlayers.forEach((player, index) => {
+            next[player.playerId] ??= {
+              x: window.innerWidth / 2 + index * 28,
+              y: window.innerHeight / 2 + index * 20,
+            };
+          });
+
+          cursorsRef.current = next;
+          return next;
+        });
       })
       .on("broadcast", { event: "request-game-state" }, () => {
         void channel.send({
@@ -110,68 +155,152 @@ export default function ScreenPage() {
           payload: gameStateRef.current,
         });
       })
-      .on("broadcast", { event: "answer-submitted" }, ({ payload }) => {
-        const submission = payload as AnswerSubmissionPayload;
+      .on("broadcast", { event: "cursor-move" }, ({ payload }) => {
+        const movement = payload as CursorMovePayload;
+        const dx = Math.max(-70, Math.min(70, Number(movement.dx) || 0));
+        const dy = Math.max(-70, Math.min(70, Number(movement.dy) || 0));
+
+        if (!movement.playerId || (!dx && !dy)) return;
+
+        setCursors((current) => {
+          const previous = current[movement.playerId] ?? {
+            x: window.innerWidth / 2,
+            y: window.innerHeight / 2,
+          };
+          const next = {
+            ...current,
+            [movement.playerId]: {
+              x: Math.max(10, Math.min(window.innerWidth - 10, previous.x + dx)),
+              y: Math.max(10, Math.min(window.innerHeight - 10, previous.y + dy)),
+            },
+          };
+
+          cursorsRef.current = next;
+          return next;
+        });
+      })
+      .on("broadcast", { event: "pointer-down" }, ({ payload }) => {
+        const action = payload as PointerActionPayload;
+        const cursor = cursorsRef.current[action.playerId];
         const activeState = gameStateRef.current;
 
-        if (
-          activeState.phase !== "question" ||
-          activeState.question?.id !== submission.questionId
-        ) {
+        if (!cursor || activeState.phase !== "question") return;
+
+        const card = document
+          .elementFromPoint(cursor.x, cursor.y)
+          ?.closest<HTMLElement>("[data-answer-card]");
+        const answerId = card?.dataset.answerCard;
+        const alreadyHeld = Object.values(draggingRef.current).includes(
+          answerId ?? "",
+        );
+
+        if (!answerId || alreadyHeld || solvedAnswersRef.current[answerId]) {
+          setLastActions((current) => ({
+            ...current,
+            [action.playerId]: "Move over an answer card",
+          }));
           return;
         }
 
-        const alreadyProcessed =
-          processedRef.current.get(submission.questionId) ?? new Set<string>();
-
-        if (alreadyProcessed.has(submission.playerId)) return;
-
-        alreadyProcessed.add(submission.playerId);
-        processedRef.current.set(submission.questionId, alreadyProcessed);
-
-        const sourceQuestion = questionBank.find(
-          (question) => question.id === submission.questionId,
+        const nextDragging = {
+          ...draggingRef.current,
+          [action.playerId]: answerId,
+        };
+        draggingRef.current = nextDragging;
+        setDragging(nextDragging);
+        setLastActions((current) => ({
+          ...current,
+          [action.playerId]: "Holding a card",
+        }));
+      })
+      .on("broadcast", { event: "pointer-up" }, ({ payload }) => {
+        const action = payload as PointerActionPayload;
+        const answerId = draggingRef.current[action.playerId];
+        const cursor = cursorsRef.current[action.playerId];
+        const activeQuestion = questionBank.find(
+          (question) => question.id === gameStateRef.current.question?.id,
         );
 
-        if (!sourceQuestion) return;
+        if (!answerId || !cursor || !activeQuestion) return;
 
-        const correctCount = sourceQuestion.answers.filter(
-          (answer) => submission.placements[answer.id] === answer.targetId,
-        ).length;
-        const isPerfect = correctCount === sourceQuestion.answers.length;
-        const speedBonus = isPerfect
-          ? Math.max(0, 400 - Math.floor(submission.elapsedMs / 100))
-          : 0;
-        const points = correctCount * 200 + speedBonus;
-        const previousScore = scoresRef.current[submission.playerId]?.score ?? 0;
+        const targetElement = document
+          .elementFromPoint(cursor.x, cursor.y)
+          ?.closest<HTMLElement>("[data-answer-target]");
+        const targetId = targetElement?.dataset.answerTarget;
+        const answer = activeQuestion.answers.find((item) => item.id === answerId);
+        const correct = Boolean(targetId && answer?.targetId === targetId);
+        const player = playersRef.current.find(
+          (item) => item.playerId === action.playerId,
+        );
+        const previousScore = scoresRef.current[action.playerId]?.score ?? 0;
+        const points = correct ? 250 : 0;
         const totalScore = previousScore + points;
-        const nextScores = {
-          ...scoresRef.current,
-          [submission.playerId]: {
-            name: submission.playerName,
-            score: totalScore,
-            answered: true,
-            correctCount,
-            answerCount: sourceQuestion.answers.length,
-          },
-        };
 
-        scoresRef.current = nextScores;
-        setScores(nextScores);
+        const nextDragging = { ...draggingRef.current };
+        delete nextDragging[action.playerId];
+        draggingRef.current = nextDragging;
+        setDragging(nextDragging);
 
-        const result: AnswerResultPayload = {
-          playerId: submission.playerId,
-          questionId: submission.questionId,
-          correctCount,
-          answerCount: sourceQuestion.answers.length,
+        if (correct && targetId) {
+          const nextSolved = {
+            ...solvedAnswersRef.current,
+            [answerId]: { targetId, playerId: action.playerId },
+          };
+          const nextScores = {
+            ...scoresRef.current,
+            [action.playerId]: {
+              name: player?.name ?? "Player",
+              score: totalScore,
+            },
+          };
+
+          solvedAnswersRef.current = nextSolved;
+          scoresRef.current = nextScores;
+          setSolvedAnswers(nextSolved);
+          setScores(nextScores);
+
+          if (Object.keys(nextSolved).length === activeQuestion.answers.length) {
+            void channel.send({
+              type: "broadcast",
+              event: "round-complete",
+              payload: { questionId: activeQuestion.id },
+            });
+          }
+        }
+
+        setLastActions((current) => ({
+          ...current,
+          [action.playerId]: correct ? `Correct! +${points}` : "Try another box",
+        }));
+
+        const result: DropResultPayload = {
+          playerId: action.playerId,
+          questionId: activeQuestion.id,
+          answerId,
+          correct,
           points,
           totalScore,
         };
 
         void channel.send({
           type: "broadcast",
-          event: "answer-result",
+          event: "drop-result",
           payload: result,
+        });
+      })
+      .on("broadcast", { event: "recenter" }, ({ payload }) => {
+        const action = payload as PointerActionPayload;
+
+        setCursors((current) => {
+          const next = {
+            ...current,
+            [action.playerId]: {
+              x: window.innerWidth / 2,
+              y: window.innerHeight / 2,
+            },
+          };
+          cursorsRef.current = next;
+          return next;
         });
       })
       .subscribe(async (subscriptionStatus) => {
@@ -197,6 +326,27 @@ export default function ScreenPage() {
     };
   }, [roomCode]);
 
+  useEffect(() => {
+    function keepCursorsOnScreen() {
+      setCursors((current) => {
+        const next = Object.fromEntries(
+          Object.entries(current).map(([playerId, cursor]) => [
+            playerId,
+            {
+              x: Math.max(10, Math.min(window.innerWidth - 10, cursor.x)),
+              y: Math.max(10, Math.min(window.innerHeight - 10, cursor.y)),
+            },
+          ]),
+        );
+        cursorsRef.current = next;
+        return next;
+      });
+    }
+
+    window.addEventListener("resize", keepCursorsOnScreen);
+    return () => window.removeEventListener("resize", keepCursorsOnScreen);
+  }, []);
+
   function broadcastState(nextState: GameStatePayload) {
     gameStateRef.current = nextState;
     setGameState(nextState);
@@ -212,20 +362,11 @@ export default function ScreenPage() {
     const question = questionBank[index];
     if (!question) return;
 
-    processedRef.current.set(question.id, new Set());
-    const resetAnswerStatus = Object.fromEntries(
-      Object.entries(scoresRef.current).map(([playerId, entry]) => [
-        playerId,
-        {
-          ...entry,
-          answered: false,
-          correctCount: undefined,
-          answerCount: undefined,
-        },
-      ]),
-    );
-    scoresRef.current = resetAnswerStatus;
-    setScores(resetAnswerStatus);
+    solvedAnswersRef.current = {};
+    draggingRef.current = {};
+    setSolvedAnswers({});
+    setDragging({});
+    setLastActions({});
 
     broadcastState({
       phase: "question",
@@ -254,7 +395,11 @@ export default function ScreenPage() {
   function playAgain() {
     scoresRef.current = {};
     setScores({});
-    processedRef.current.clear();
+    solvedAnswersRef.current = {};
+    draggingRef.current = {};
+    setSolvedAnswers({});
+    setDragging({});
+    setLastActions({});
     broadcastState({
       phase: "lobby",
       questionIndex: 0,
@@ -263,20 +408,19 @@ export default function ScreenPage() {
   }
 
   const rankedPlayers = useMemo(() => {
-    const playerLookup = new Map(players.map((player) => [player.playerId, player]));
-
-    return Object.entries(scores)
-      .map(([playerId, entry]) => ({
-        playerId,
-        ...entry,
-        color: playerLookup.get(playerId)?.color ?? FALLBACK_COLOR,
+    return players
+      .map((player) => ({
+        playerId: player.playerId,
+        name: scores[player.playerId]?.name ?? player.name,
+        score: scores[player.playerId]?.score ?? 0,
+        color: player.color,
       }))
       .sort((a, b) => b.score - a.score);
   }, [players, scores]);
 
-  const answeredCount = players.filter(
-    (player) => scores[player.playerId]?.answered,
-  ).length;
+  const solvedCount = Object.keys(solvedAnswers).length;
+  const activeAnswerCount = gameState.question?.answers.length ?? 0;
+  const roundComplete = activeAnswerCount > 0 && solvedCount === activeAnswerCount;
 
   if (gameState.phase === "lobby") {
     return (
@@ -367,6 +511,9 @@ export default function ScreenPage() {
                         {player.name.charAt(0).toUpperCase()}
                       </span>
                       <span className="flex-1 font-semibold">{player.name}</span>
+                      <span className={`text-xs font-bold ${player.motionEnabled ? "text-[#44d79b]" : "text-white/30"}`}>
+                        {player.motionEnabled ? "Motion ready" : "Enable motion"}
+                      </span>
                       {index === 0 && <Sparkles className="size-4 text-[#ffd166]" />}
                     </div>
                   ))}
@@ -449,14 +596,17 @@ export default function ScreenPage() {
           question={gameState.question}
           questionIndex={gameState.questionIndex}
           questionCount={gameState.questionCount}
+          solvedAnswers={solvedAnswers}
+          dragging={dragging}
+          players={players}
         />
 
         <aside className="host-panel flex min-h-[320px] flex-col p-6">
           <div className="flex items-center justify-between border-b border-white/8 pb-5">
             <div>
-              <p className="text-sm text-white/45">Answers in</p>
+              <p className="text-sm text-white/45">Cards sorted</p>
               <p className="mt-1 text-3xl font-black">
-                {answeredCount}<span className="text-white/25">/{players.length}</span>
+                {solvedCount}<span className="text-white/25">/{activeAnswerCount}</span>
               </p>
             </div>
             <div className="flex size-12 items-center justify-center rounded-2xl bg-[#44d79b]/10 text-[#44d79b]">
@@ -471,13 +621,12 @@ export default function ScreenPage() {
                 <div key={player.playerId} className="flex items-center gap-3 rounded-xl bg-white/[.035] px-3.5 py-3">
                   <span className="size-2.5 rounded-full" style={{ backgroundColor: player.color }} />
                   <span className="min-w-0 flex-1 truncate font-semibold">{player.name}</span>
-                  {entry?.answered ? (
-                    <span className="flex items-center gap-1 text-xs font-bold text-[#44d79b]">
-                      <Check className="size-3.5" /> {entry.correctCount}/{entry.answerCount}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-white/30">sorting…</span>
-                  )}
+                  <span className="text-right text-xs text-white/35">
+                    {lastActions[player.playerId] ?? "Move your cursor"}
+                  </span>
+                  <strong className="min-w-12 text-right font-mono text-sm">
+                    {entry?.score ?? 0}
+                  </strong>
                 </div>
               );
             })}
@@ -485,6 +634,7 @@ export default function ScreenPage() {
 
           <Button
             className="h-13 w-full rounded-2xl bg-white font-bold text-[#151722] hover:bg-white/90"
+            disabled={!roundComplete}
             onClick={goNext}
           >
             {gameState.questionIndex === questionBank.length - 1 ? "Show results" : "Next question"}
@@ -492,6 +642,12 @@ export default function ScreenPage() {
           </Button>
         </aside>
       </div>
+      <AirMouseCursors
+        players={players}
+        cursors={cursors}
+        dragging={dragging}
+        question={gameState.question}
+      />
     </HostShell>
   );
 }
@@ -538,55 +694,154 @@ function QuestionStage({
   question,
   questionIndex,
   questionCount,
+  solvedAnswers,
+  dragging,
+  players,
 }: {
   question?: PublicQuestion;
   questionIndex: number;
   questionCount: number;
+  solvedAnswers: Record<string, SolvedAnswer>;
+  dragging: Record<string, string>;
+  players: PlayerPresence[];
 }) {
   if (!question) return null;
+
+  const heldAnswerIds = new Set(Object.values(dragging));
+  const playerLookup = new Map(players.map((player) => [player.playerId, player]));
 
   return (
     <section className="host-panel flex flex-col overflow-hidden p-6 sm:p-8">
       <div className="flex items-center justify-between">
         <span className="eyebrow">Question {questionIndex + 1} of {questionCount}</span>
-        <span className="text-sm text-white/35">Drag every card</span>
+        <span className="flex items-center gap-2 text-sm text-white/35">
+          <MousePointer2 className="size-4" /> AirMouse controls active
+        </span>
       </div>
-      <h1 className="mt-6 max-w-5xl text-balance text-4xl font-black leading-[1.02] tracking-[-.04em] sm:text-6xl">
+      <h1 className="mt-5 max-w-5xl text-balance text-3xl font-black leading-[1.02] tracking-[-.04em] sm:text-5xl">
         {question.prompt}
       </h1>
-      <p className="mt-3 text-lg text-white/45">{question.instruction}</p>
+      <p className="mt-2 text-base text-white/45">
+        Point with your phone. Hold Grab over a card, move it, then release over a box.
+      </p>
 
-      <div className={`mt-8 grid flex-1 content-center gap-4 ${question.targets.length === 3 ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
-        {question.targets.map((target, index) => (
-          <div
-            key={target.id}
-            className="relative flex min-h-48 flex-col justify-between overflow-hidden rounded-[1.6rem] border border-white/10 bg-white/[.045] p-6"
-          >
-            <span className="absolute -right-5 -top-8 text-[9rem] font-black leading-none text-white/[.025]">
-              {index + 1}
-            </span>
-            <div className="relative">
-              <p className="text-2xl font-black">{target.label}</p>
-              <p className="mt-1 text-sm text-white/35">{target.hint}</p>
+      <div className={`mt-6 grid flex-1 content-center gap-4 ${question.targets.length === 3 ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
+        {question.targets.map((target, index) => {
+          const placedAnswers = question.answers.filter(
+            (answer) => solvedAnswers[answer.id]?.targetId === target.id,
+          );
+
+          return (
+            <div
+              key={target.id}
+              data-answer-target={target.id}
+              className="relative flex min-h-44 flex-col justify-between overflow-hidden rounded-[1.6rem] border-2 border-dashed border-white/14 bg-white/[.045] p-5 transition-colors"
+            >
+              <span className="absolute -right-4 -top-7 text-[8rem] font-black leading-none text-white/[.025]">
+                {index + 1}
+              </span>
+              <div className="relative pointer-events-none">
+                <p className="text-2xl font-black">{target.label}</p>
+                <p className="mt-1 text-sm text-white/35">{target.hint}</p>
+              </div>
+              <div className="relative mt-5 flex min-h-12 flex-wrap content-end gap-2 pointer-events-none">
+                {placedAnswers.length === 0 ? (
+                  <span className="rounded-lg border border-dashed border-white/10 px-3 py-2 text-xs text-white/20">
+                    Drop here
+                  </span>
+                ) : (
+                  placedAnswers.map((answer) => {
+                    const owner = playerLookup.get(solvedAnswers[answer.id].playerId);
+                    return (
+                      <span
+                        key={answer.id}
+                        className="inline-flex items-center gap-2 rounded-xl bg-[#fffdf6] px-3 py-2.5 font-bold text-[#191b26] shadow-lg"
+                      >
+                        <span
+                          className="size-2 rounded-full"
+                          style={{ backgroundColor: owner?.color ?? FALLBACK_COLOR }}
+                        />
+                        {answer.label}
+                      </span>
+                    );
+                  })
+                )}
+              </div>
             </div>
-            <div className="relative mt-6 flex flex-wrap gap-2">
-              {question.answers.slice(0, 2).map((answer) => (
-                <span key={`${target.id}-${answer.id}`} className="rounded-lg border border-dashed border-white/10 px-3 py-2 text-xs text-white/15">
-                  answer
-                </span>
-              ))}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      <div className="mt-7 flex flex-wrap gap-2.5">
-        {question.answers.map((answer) => (
-          <span key={answer.id} className="rounded-xl bg-[#fffdf6] px-4 py-3 font-bold text-[#191b26] shadow-lg">
-            {answer.label}
-          </span>
-        ))}
+      <div className="mt-5 min-h-14 rounded-2xl border border-white/8 bg-black/15 p-3">
+        <div className="flex flex-wrap gap-2.5">
+          {question.answers
+            .filter(
+              (answer) => !solvedAnswers[answer.id] && !heldAnswerIds.has(answer.id),
+            )
+            .map((answer) => (
+              <span
+                key={answer.id}
+                data-answer-card={answer.id}
+                className="cursor-none rounded-xl bg-[#fffdf6] px-4 py-3 font-bold text-[#191b26] shadow-lg ring-2 ring-transparent"
+              >
+                {answer.label}
+              </span>
+            ))}
+          {question.answers.every(
+            (answer) => solvedAnswers[answer.id] || heldAnswerIds.has(answer.id),
+          ) && (
+            <span className="px-2 py-2 text-sm font-semibold text-white/35">
+              All cards are being sorted
+            </span>
+          )}
+        </div>
       </div>
     </section>
   );
+}
+
+function AirMouseCursors({
+  players,
+  cursors,
+  dragging,
+  question,
+}: {
+  players: PlayerPresence[];
+  cursors: Record<string, CursorPosition>;
+  dragging: Record<string, string>;
+  question?: PublicQuestion;
+}) {
+  return players.map((player) => {
+    const cursor = cursors[player.playerId];
+    const heldAnswerId = dragging[player.playerId];
+    const heldAnswer = question?.answers.find((answer) => answer.id === heldAnswerId);
+
+    if (!cursor) return null;
+
+    return (
+      <div
+        key={player.playerId}
+        className="pointer-events-none fixed z-[100]"
+        style={{ left: cursor.x, top: cursor.y }}
+      >
+        {heldAnswer && (
+          <div className="absolute bottom-5 left-5 whitespace-nowrap rounded-xl bg-[#fffdf6] px-4 py-3 font-bold text-[#191b26] shadow-2xl ring-2 ring-white/70">
+            {heldAnswer.label}
+          </div>
+        )}
+        <div
+          className="absolute -left-1 -top-1 size-7 rounded-full border-[3px] border-white shadow-xl"
+          style={{ backgroundColor: player.color }}
+        >
+          <span className="absolute left-1/2 top-1/2 size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />
+        </div>
+        <span
+          className="absolute left-5 top-5 whitespace-nowrap rounded-lg px-2 py-1 text-[11px] font-black text-white shadow-lg"
+          style={{ backgroundColor: player.color }}
+        >
+          {player.name}
+        </span>
+      </div>
+    );
+  });
 }

@@ -8,6 +8,7 @@ export type PlayerPresence = {
   name: string;
   color: string;
   onlineAt: string;
+  motionEnabled?: boolean;
 };
 
 export type HostPresence = {
@@ -23,19 +24,21 @@ export type GameStatePayload = {
   startedAt?: number;
 };
 
-export type AnswerSubmissionPayload = {
+export type CursorMovePayload = {
   playerId: string;
-  playerName: string;
-  questionId: string;
-  placements: Record<string, string>;
-  elapsedMs: number;
+  dx: number;
+  dy: number;
 };
 
-export type AnswerResultPayload = {
+export type PointerActionPayload = {
+  playerId: string;
+};
+
+export type DropResultPayload = {
   playerId: string;
   questionId: string;
-  correctCount: number;
-  answerCount: number;
+  answerId: string;
+  correct: boolean;
   points: number;
   totalScore: number;
 };

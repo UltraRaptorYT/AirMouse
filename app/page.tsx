@@ -54,7 +54,7 @@ export default function HomePage() {
               Think fast.<br />Drag smart.
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-relaxed text-white/55">
-              Scan the host&apos;s QR code, join the room, and race your friends to drag every answer into the right box.
+              Scan the host&apos;s QR code, use your phone as a motion controller, and race your friends to fly every answer into the right box.
             </p>
 
             <div className="mt-9 grid max-w-xl grid-cols-3 gap-3">
