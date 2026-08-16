@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
   ArrowRight,
@@ -31,6 +31,7 @@ import {
   type RoomSocket,
 } from "@/lib/realtime/room";
 import type {
+  CursorAimPayload,
   CursorMovePayload,
   DropResultPayload,
   GameStatePayload,
@@ -68,6 +69,8 @@ export default function ScreenPage() {
     Record<string, SolvedAnswer>
   >({});
   const [lastActions, setLastActions] = useState<Record<string, string>>({});
+  const [readyPlayerIds, setReadyPlayerIds] = useState<string[]>([]);
+  const [countdown, setCountdown] = useState<number | null>(null);
   const [gameState, setGameState] = useState<GameStatePayload>({
     phase: "lobby",
     questionIndex: 0,
@@ -82,6 +85,7 @@ export default function ScreenPage() {
   const cursorsRef = useRef(cursors);
   const draggingRef = useRef(dragging);
   const solvedAnswersRef = useRef(solvedAnswers);
+  const readyPlayersRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     gameStateRef.current = gameState;
@@ -130,6 +134,10 @@ export default function ScreenPage() {
         cursorsRef.current = next;
         return next;
       });
+
+      if (readyPlayersRef.current.delete(playerId)) {
+        setReadyPlayerIds([...readyPlayersRef.current]);
+      }
     }
 
     function syncPlayers(nextPlayers: PlayerPresence[]) {
@@ -178,6 +186,38 @@ export default function ScreenPage() {
       });
     }
 
+    function updatePlayerReady(playerId: string, cursor: CursorPosition) {
+      const activeQuestion = gameStateRef.current.question;
+      const roundIsComplete = Boolean(
+        activeQuestion &&
+          Object.keys(solvedAnswersRef.current).length ===
+            activeQuestion.answers.length,
+      );
+      const readyZone = roundIsComplete
+        ? document.querySelector<HTMLElement>("[data-next-zone]")
+        : null;
+      const bounds = readyZone?.getBoundingClientRect();
+      const isReady = Boolean(
+        bounds &&
+          cursor.x >= bounds.left &&
+          cursor.x <= bounds.right &&
+          cursor.y >= bounds.top &&
+          cursor.y <= bounds.bottom,
+      );
+      const wasReady = readyPlayersRef.current.has(playerId);
+      if (isReady === wasReady) return;
+
+      const nextReadyPlayers = new Set(readyPlayersRef.current);
+      if (isReady) nextReadyPlayers.add(playerId);
+      else nextReadyPlayers.delete(playerId);
+      readyPlayersRef.current = nextReadyPlayers;
+      setReadyPlayerIds([...nextReadyPlayers]);
+      setLastActions((current) => ({
+        ...current,
+        [playerId]: isReady ? "Ready for next question" : "Move to the launch zone",
+      }));
+    }
+
     function handleMessage(message: ServerRoomMessage) {
       if (message.type === "connected" || message.type === "presence") {
         syncPlayers(message.players);
@@ -191,22 +231,46 @@ export default function ScreenPage() {
 
         if (!movement.playerId || (!dx && !dy)) return;
 
-        setCursors((current) => {
-          const previous = current[movement.playerId] ?? {
-            x: window.innerWidth / 2,
-            y: window.innerHeight / 2,
-          };
-          const next = {
-            ...current,
-            [movement.playerId]: {
-              x: Math.max(10, Math.min(window.innerWidth - 10, previous.x + dx)),
-              y: Math.max(10, Math.min(window.innerHeight - 10, previous.y + dy)),
-            },
-          };
+        const previous = cursorsRef.current[movement.playerId] ?? {
+          x: window.innerWidth / 2,
+          y: window.innerHeight / 2,
+        };
+        const nextPosition = {
+          x: Math.max(10, Math.min(window.innerWidth - 10, previous.x + dx)),
+          y: Math.max(10, Math.min(window.innerHeight - 10, previous.y + dy)),
+        };
+        const next = {
+          ...cursorsRef.current,
+          [movement.playerId]: nextPosition,
+        };
+        cursorsRef.current = next;
+        setCursors(next);
+        updatePlayerReady(movement.playerId, nextPosition);
+        return;
+      }
 
-          cursorsRef.current = next;
-          return next;
-        });
+      if (message.type === "cursor-aim") {
+        const aim: CursorAimPayload = message.payload;
+        const x = Math.max(-1, Math.min(1, Number(aim.x) || 0));
+        const y = Math.max(-1, Math.min(1, Number(aim.y) || 0));
+        if (!aim.playerId) return;
+
+        const edgePadding = 16;
+        const nextPosition = {
+          x:
+            edgePadding +
+            ((x + 1) / 2) * Math.max(0, window.innerWidth - edgePadding * 2),
+          y:
+            edgePadding +
+            ((y + 1) / 2) * Math.max(0, window.innerHeight - edgePadding * 2),
+        };
+        const next = {
+          ...cursorsRef.current,
+          [aim.playerId]: nextPosition,
+        };
+        cursorsRef.current = next;
+        setCursors(next);
+        updatePlayerReady(aim.playerId, nextPosition);
         return;
       }
 
@@ -332,6 +396,9 @@ export default function ScreenPage() {
           cursorsRef.current = next;
           return next;
         });
+        if (readyPlayersRef.current.delete(action.playerId)) {
+          setReadyPlayerIds([...readyPlayersRef.current]);
+        }
       }
     }
 
@@ -381,21 +448,24 @@ export default function ScreenPage() {
     return () => window.removeEventListener("resize", keepCursorsOnScreen);
   }, []);
 
-  function broadcastState(nextState: GameStatePayload) {
+  const broadcastState = useCallback((nextState: GameStatePayload) => {
     gameStateRef.current = nextState;
     setGameState(nextState);
 
     socketRef.current?.send({ type: "game-state", payload: nextState });
-  }
+  }, []);
 
-  function startQuestion(index: number) {
+  const startQuestion = useCallback((index: number) => {
     const question = questionBank[index];
     if (!question) return;
 
     solvedAnswersRef.current = {};
     draggingRef.current = {};
+    readyPlayersRef.current = new Set();
     setSolvedAnswers({});
     setDragging({});
+    setReadyPlayerIds([]);
+    setCountdown(null);
     setLastActions({});
 
     broadcastState({
@@ -405,12 +475,15 @@ export default function ScreenPage() {
       questionCount: questionBank.length,
       startedAt: Date.now(),
     });
-  }
+  }, [broadcastState]);
 
-  function goNext() {
-    const nextIndex = gameState.questionIndex + 1;
+  const goNext = useCallback(() => {
+    const nextIndex = gameStateRef.current.questionIndex + 1;
 
     if (nextIndex >= questionBank.length) {
+      readyPlayersRef.current = new Set();
+      setReadyPlayerIds([]);
+      setCountdown(null);
       broadcastState({
         phase: "finished",
         questionIndex: questionBank.length - 1,
@@ -420,15 +493,18 @@ export default function ScreenPage() {
     }
 
     startQuestion(nextIndex);
-  }
+  }, [broadcastState, startQuestion]);
 
   function playAgain() {
     scoresRef.current = {};
     setScores({});
     solvedAnswersRef.current = {};
     draggingRef.current = {};
+    readyPlayersRef.current = new Set();
     setSolvedAnswers({});
     setDragging({});
+    setReadyPlayerIds([]);
+    setCountdown(null);
     setLastActions({});
     broadcastState({
       phase: "lobby",
@@ -451,6 +527,41 @@ export default function ScreenPage() {
   const solvedCount = Object.keys(solvedAnswers).length;
   const activeAnswerCount = gameState.question?.answers.length ?? 0;
   const roundComplete = activeAnswerCount > 0 && solvedCount === activeAnswerCount;
+  const allPlayersReady =
+    roundComplete &&
+    players.length > 0 &&
+    players.every((player) => readyPlayerIds.includes(player.playerId));
+
+  useEffect(() => {
+    let startTimer: number | null = null;
+    let tickTimer: number | null = null;
+
+    if (!allPlayersReady) {
+      startTimer = window.setTimeout(() => setCountdown(null), 0);
+      return () => {
+        if (startTimer !== null) window.clearTimeout(startTimer);
+      };
+    }
+
+    let remaining = 3;
+    startTimer = window.setTimeout(() => setCountdown(remaining), 0);
+    tickTimer = window.setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        if (tickTimer !== null) window.clearInterval(tickTimer);
+        tickTimer = null;
+        setCountdown(null);
+        goNext();
+        return;
+      }
+      setCountdown(remaining);
+    }, 1_000);
+
+    return () => {
+      if (startTimer !== null) window.clearTimeout(startTimer);
+      if (tickTimer !== null) window.clearInterval(tickTimer);
+    };
+  }, [allPlayersReady, goNext]);
 
   if (gameState.phase === "lobby") {
     return (
@@ -542,7 +653,7 @@ export default function ScreenPage() {
                       </span>
                       <span className="flex-1 font-semibold">{player.name}</span>
                       <span className={`text-xs font-bold ${player.motionEnabled ? "text-[#44d79b]" : "text-white/30"}`}>
-                        {player.motionEnabled ? "Motion ready" : "Enable motion"}
+                        {player.motionEnabled ? "Motion ready" : "Connecting motion…"}
                       </span>
                       {index === 0 && <Sparkles className="size-4 text-[#ffd166]" />}
                     </div>
@@ -647,12 +758,21 @@ export default function ScreenPage() {
           <div className="min-h-0 flex-1 space-y-2 overflow-y-auto py-5">
             {players.map((player) => {
               const entry = scores[player.playerId];
+              const isReady = readyPlayerIds.includes(player.playerId);
               return (
-                <div key={player.playerId} className="flex items-center gap-3 rounded-xl bg-white/[.035] px-3.5 py-3">
-                  <span className="size-2.5 rounded-full" style={{ backgroundColor: player.color }} />
+                <div
+                  key={player.playerId}
+                  className={`flex items-center gap-3 rounded-xl px-3.5 py-3 transition-colors ${
+                    isReady ? "bg-[#44d79b]/12" : "bg-white/[.035]"
+                  }`}
+                >
+                  <span
+                    className={`size-2.5 rounded-full ${isReady ? "ring-4 ring-[#44d79b]/15" : ""}`}
+                    style={{ backgroundColor: player.color }}
+                  />
                   <span className="min-w-0 flex-1 truncate font-semibold">{player.name}</span>
-                  <span className="text-right text-xs text-white/35">
-                    {lastActions[player.playerId] ?? "Move your cursor"}
+                  <span className={`text-right text-xs ${isReady ? "font-bold text-[#44d79b]" : "text-white/35"}`}>
+                    {isReady ? "Ready" : lastActions[player.playerId] ?? "Move your cursor"}
                   </span>
                   <strong className="min-w-12 text-right font-mono text-sm">
                     {entry?.score ?? 0}
@@ -662,14 +782,49 @@ export default function ScreenPage() {
             })}
           </div>
 
-          <Button
-            className="h-13 w-full rounded-2xl bg-white font-bold text-[#151722] hover:bg-white/90"
-            disabled={!roundComplete}
-            onClick={goNext}
-          >
-            {gameState.questionIndex === questionBank.length - 1 ? "Show results" : "Next question"}
-            <ArrowRight className="ml-1 size-4" />
-          </Button>
+          {roundComplete ? (
+            <div
+              data-next-zone
+              className={`relative flex min-h-40 flex-col items-center justify-center overflow-hidden rounded-[1.6rem] border-2 p-5 text-center transition-colors ${
+                allPlayersReady
+                  ? "border-[#44d79b] bg-[#44d79b]/18"
+                  : "border-dashed border-[#ff8b70]/55 bg-[#ff6b4a]/10"
+              }`}
+            >
+              <div className="absolute inset-x-0 bottom-0 h-1.5 bg-white/8">
+                <div
+                  className="h-full bg-[#44d79b] transition-[width] duration-300"
+                  style={{
+                    width: `${players.length ? (readyPlayerIds.length / players.length) * 100 : 0}%`,
+                  }}
+                />
+              </div>
+              {countdown !== null ? (
+                <>
+                  <span className="font-mono text-6xl font-black text-[#44d79b]">
+                    {countdown}
+                  </span>
+                  <span className="mt-1 text-sm font-bold text-white/65">Launching next question…</span>
+                </>
+              ) : (
+                <>
+                  <ArrowRight className="size-8 text-[#ff8b70]" />
+                  <strong className="mt-2 text-xl">
+                    {gameState.questionIndex === questionBank.length - 1
+                      ? "Fly every cursor here for results"
+                      : "Fly every cursor here for the next question"}
+                  </strong>
+                  <span className="mt-2 font-mono text-sm font-bold text-white/50">
+                    {readyPlayerIds.length}/{players.length} ready
+                  </span>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="flex min-h-24 items-center justify-center rounded-2xl border border-dashed border-white/10 px-4 text-center text-sm font-semibold text-white/30">
+              Sort every card to unlock the next-question zone
+            </div>
+          )}
         </aside>
       </div>
       <AirMouseCursors
@@ -753,11 +908,14 @@ function QuestionStage({
       <h1 className="mt-5 max-w-5xl text-balance text-3xl font-black leading-[1.02] tracking-[-.04em] sm:text-5xl">
         {question.prompt}
       </h1>
-      <p className="mt-2 text-base text-white/45">
-        Point with your phone. Hold Grab over a card, move it, then release over a box.
+      <p className="mt-3 text-lg font-semibold text-[#ffb09e]">
+        {question.instruction}
+      </p>
+      <p className="mt-1 text-sm text-white/45">
+        Drag every card — hold Grab over a large card, steer it to a box, then release.
       </p>
 
-      <div className={`mt-6 grid flex-1 content-center gap-4 ${question.targets.length === 3 ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
+      <div className={`mt-5 grid flex-1 content-center gap-4 ${question.targets.length === 3 ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
         {question.targets.map((target, index) => {
           const placedAnswers = question.answers.filter(
             (answer) => solvedAnswers[answer.id]?.targetId === target.id,
@@ -767,14 +925,14 @@ function QuestionStage({
             <div
               key={target.id}
               data-answer-target={target.id}
-              className="relative flex min-h-44 flex-col justify-between overflow-hidden rounded-[1.6rem] border-2 border-dashed border-white/14 bg-white/[.045] p-5 transition-colors"
+              className="relative flex min-h-56 flex-col justify-between overflow-hidden rounded-[1.8rem] border-2 border-dashed border-white/20 bg-white/[.055] p-6 transition-colors"
             >
               <span className="absolute -right-4 -top-7 text-[8rem] font-black leading-none text-white/[.025]">
                 {index + 1}
               </span>
               <div className="relative pointer-events-none">
-                <p className="text-2xl font-black">{target.label}</p>
-                <p className="mt-1 text-sm text-white/35">{target.hint}</p>
+                <p className="text-3xl font-black">{target.label}</p>
+                <p className="mt-2 text-base text-white/40">{target.hint}</p>
               </div>
               <div className="relative mt-5 flex min-h-12 flex-wrap content-end gap-2 pointer-events-none">
                 {placedAnswers.length === 0 ? (
@@ -787,7 +945,7 @@ function QuestionStage({
                     return (
                       <span
                         key={answer.id}
-                        className="inline-flex items-center gap-2 rounded-xl bg-[#fffdf6] px-3 py-2.5 font-bold text-[#191b26] shadow-lg"
+                      className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-[#fffdf6] px-4 py-3 text-lg font-bold text-[#191b26] shadow-lg"
                       >
                         <span
                           className="size-2 rounded-full"
@@ -804,8 +962,8 @@ function QuestionStage({
         })}
       </div>
 
-      <div className="mt-5 min-h-14 rounded-2xl border border-white/8 bg-black/15 p-3">
-        <div className="flex flex-wrap gap-2.5">
+      <div className="mt-5 min-h-24 rounded-[1.5rem] border border-white/10 bg-black/20 p-4">
+        <div className="flex flex-wrap justify-center gap-3">
           {question.answers
             .filter(
               (answer) => !solvedAnswers[answer.id] && !heldAnswerIds.has(answer.id),
@@ -814,7 +972,7 @@ function QuestionStage({
               <span
                 key={answer.id}
                 data-answer-card={answer.id}
-                className="cursor-none rounded-xl bg-[#fffdf6] px-4 py-3 font-bold text-[#191b26] shadow-lg ring-2 ring-transparent"
+                className="inline-flex min-h-20 min-w-44 cursor-none items-center justify-center rounded-2xl bg-[#fffdf6] px-7 py-5 text-center text-xl font-black text-[#191b26] shadow-xl ring-2 ring-transparent"
               >
                 {answer.label}
               </span>

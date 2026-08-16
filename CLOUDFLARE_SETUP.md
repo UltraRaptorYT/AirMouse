@@ -87,7 +87,7 @@ are opened.
 
 1. Open the deployed `/screen` page on a laptop.
 2. Scan its QR code with a phone.
-3. Join, enable motion and move the cursor.
+3. Join; motion permission is requested during that tap and the cursor starts automatically.
 4. Turn Wi-Fi off on the phone briefly, then turn it back on.
 5. The controller should show a reconnecting spinner and automatically return
    to the same player within the 15-second host grace period.

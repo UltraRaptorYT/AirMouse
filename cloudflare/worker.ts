@@ -181,6 +181,17 @@ export class Room extends DurableObject<Env> {
     if (!attachment.player) return;
 
     const playerId = attachment.clientId;
+    if (message.type === "cursor-aim") {
+      const rawX = Number(message.payload.x);
+      const rawY = Number(message.payload.y);
+      if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) return;
+
+      const x = Math.max(-1, Math.min(1, rawX));
+      const y = Math.max(-1, Math.min(1, rawY));
+      this.sendToHosts({ type: "cursor-aim", payload: { playerId, x, y } });
+      return;
+    }
+
     if (message.type === "cursor-move") {
       const dx = Math.max(-100, Math.min(100, Number(message.payload.dx) || 0));
       const dy = Math.max(-100, Math.min(100, Number(message.payload.dy) || 0));

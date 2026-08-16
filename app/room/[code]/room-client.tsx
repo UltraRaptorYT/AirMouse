@@ -10,8 +10,6 @@ import {
   Hand,
   LoaderCircle,
   Move3d,
-  Pause,
-  Smartphone,
   Sparkles,
   Trophy,
   UserRound,
@@ -41,12 +39,11 @@ type PermissionCapableEvent = {
 };
 
 const PLAYER_COLORS = ["#ff6b4a", "#5c7cfa", "#15a97b", "#b259e8", "#d89b22"];
-const HORIZONTAL_ORIENTATION_SENSITIVITY = 8;
-const VERTICAL_ORIENTATION_SENSITIVITY = 5;
-const HORIZONTAL_ACCELERATION_SENSITIVITY = 0.7;
-const VERTICAL_ACCELERATION_SENSITIVITY = 0.45;
+const HORIZONTAL_AIM_RANGE_DEGREES = 18;
+const VERTICAL_AIM_RANGE_DEGREES = 14;
+const AIM_SMOOTHING = 0.62;
 const SEND_INTERVAL_MS = 50;
-const DEAD_ZONE = 0.08;
+const AIM_CHANGE_THRESHOLD = 0.002;
 
 function makePlayerId(roomCode: string) {
   const storageKey = `airmouse-player-${roomCode}`;
@@ -63,6 +60,10 @@ function normalizeAngleDelta(current: number, previous: number) {
   if (delta > 180) delta -= 360;
   if (delta < -180) delta += 360;
   return delta;
+}
+
+function clampAim(value: number) {
+  return Math.max(-1, Math.min(1, value));
 }
 
 export default function RoomClient({ roomCode }: { roomCode: string }) {
@@ -89,9 +90,9 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   });
 
   const socketRef = useRef<RoomSocket | null>(null);
-  const previousOrientationRef = useRef<OrientationReading | null>(null);
-  const lastOrientationAtRef = useRef(0);
-  const movementBufferRef = useRef({ dx: 0, dy: 0 });
+  const orientationOriginRef = useRef<OrientationReading | null>(null);
+  const smoothedAimRef = useRef({ x: 0, y: 0 });
+  const lastSentAimRef = useRef({ x: Number.NaN, y: Number.NaN });
   const lastSentAtRef = useRef(0);
   const holdingRef = useRef(false);
   const joinedRef = useRef(false);
@@ -105,9 +106,6 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
     const id = makePlayerId(roomCode);
     const storedName = localStorage.getItem("airmouse-nickname") ?? "";
-    const wasJoined =
-      Boolean(storedName) &&
-      sessionStorage.getItem(`airmouse-joined-${roomCode}`) === "true";
     const storedScore = Number(
       sessionStorage.getItem(`airmouse-score-${roomCode}`) ?? "0",
     );
@@ -116,7 +114,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     ) % PLAYER_COLORS.length;
     const color = PLAYER_COLORS[colorIndex];
 
-    joinedRef.current = wasJoined;
+    joinedRef.current = false;
     nicknameRef.current = storedName;
     playerColorRef.current = color;
 
@@ -124,7 +122,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
       setPlayerId(id);
       setNickname(storedName);
       setPlayerColor(color);
-      setJoined(wasJoined);
+      setJoined(false);
       if (Number.isFinite(storedScore)) setTotalScore(storedScore);
     }, 0);
 
@@ -206,73 +204,72 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   useEffect(() => {
     if (sensorStatus !== "active" || !playerId) return;
 
-    function sendBufferedMovement() {
+    function sendAim(x: number, y: number) {
       const now = performance.now();
       if (now - lastSentAtRef.current < SEND_INTERVAL_MS) return;
 
-      const { dx, dy } = movementBufferRef.current;
-      movementBufferRef.current = { dx: 0, dy: 0 };
+      const previous = lastSentAimRef.current;
+      if (
+        Math.abs(x - previous.x) < AIM_CHANGE_THRESHOLD &&
+        Math.abs(y - previous.y) < AIM_CHANGE_THRESHOLD
+      ) {
+        return;
+      }
+
       lastSentAtRef.current = now;
-
-      if (Math.abs(dx) < DEAD_ZONE && Math.abs(dy) < DEAD_ZONE) return;
-
+      lastSentAimRef.current = { x, y };
       socketRef.current?.send({
-        type: "cursor-move",
-        payload: { dx, dy },
+        type: "cursor-aim",
+        payload: { x, y },
       });
     }
 
-    function addMovement(dx: number, dy: number) {
-      movementBufferRef.current.dx += dx;
-      movementBufferRef.current.dy += dy;
-      sendBufferedMovement();
-    }
-
     function handleOrientation(event: DeviceOrientationEvent) {
-      const current = {
-        alpha: event.alpha ?? 0,
-        beta: event.beta ?? 0,
-      };
-      const previous = previousOrientationRef.current;
-      previousOrientationRef.current = current;
-      lastOrientationAtRef.current = performance.now();
-
-      if (!previous) return;
-
-      addMovement(
-        -normalizeAngleDelta(current.alpha, previous.alpha) *
-          HORIZONTAL_ORIENTATION_SENSITIVITY,
-        -(current.beta - previous.beta) * VERTICAL_ORIENTATION_SENSITIVITY,
-      );
-    }
-
-    function handleMotion(event: DeviceMotionEvent) {
-      const acceleration = event.acceleration;
-      let dx =
-        (acceleration?.x ?? 0) * HORIZONTAL_ACCELERATION_SENSITIVITY;
-      let dy =
-        -(acceleration?.y ?? 0) * VERTICAL_ACCELERATION_SENSITIVITY;
-
-      if (performance.now() - lastOrientationAtRef.current > 250) {
-        dx += -(event.rotationRate?.beta ?? 0) * 0.08;
-        dy += -(event.rotationRate?.gamma ?? 0) * 0.08;
+      if (typeof event.alpha !== "number" || typeof event.beta !== "number") {
+        return;
       }
 
-      addMovement(dx, dy);
+      const current = {
+        alpha: event.alpha,
+        beta: event.beta,
+      };
+      const origin = orientationOriginRef.current;
+      if (!origin) {
+        orientationOriginRef.current = current;
+        smoothedAimRef.current = { x: 0, y: 0 };
+        sendAim(0, 0);
+        return;
+      }
+
+      const rawAim = {
+        x: clampAim(
+          -normalizeAngleDelta(current.alpha, origin.alpha) /
+            HORIZONTAL_AIM_RANGE_DEGREES,
+        ),
+        y: clampAim(
+          -(current.beta - origin.beta) / VERTICAL_AIM_RANGE_DEGREES,
+        ),
+      };
+      const previousAim = smoothedAimRef.current;
+      const nextAim = {
+        x: previousAim.x + (rawAim.x - previousAim.x) * AIM_SMOOTHING,
+        y: previousAim.y + (rawAim.y - previousAim.y) * AIM_SMOOTHING,
+      };
+      smoothedAimRef.current = nextAim;
+      sendAim(nextAim.x, nextAim.y);
     }
 
     window.addEventListener("deviceorientation", handleOrientation);
-    window.addEventListener("devicemotion", handleMotion);
 
     return () => {
       window.removeEventListener("deviceorientation", handleOrientation);
-      window.removeEventListener("devicemotion", handleMotion);
-      previousOrientationRef.current = null;
-      movementBufferRef.current = { dx: 0, dy: 0 };
+      orientationOriginRef.current = null;
+      smoothedAimRef.current = { x: 0, y: 0 };
+      lastSentAimRef.current = { x: Number.NaN, y: Number.NaN };
     };
   }, [sensorStatus, playerId]);
 
-  function joinRoom() {
+  async function joinRoom() {
     const cleanName = nickname.trim().replace(/\s+/g, " ").slice(0, 18);
     const socket = socketRef.current;
 
@@ -286,6 +283,9 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
       return;
     }
 
+    const motionGranted = await requestMotionAccess();
+    if (!motionGranted) return;
+
     setNickname(cleanName);
     nicknameRef.current = cleanName;
     localStorage.setItem("airmouse-nickname", cleanName);
@@ -295,7 +295,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
       playerId,
       name: cleanName,
       color: playerColor,
-      motionEnabled: false,
+      motionEnabled: true,
       onlineAt: new Date().toISOString(),
     };
     if (!socket.send({ type: "join", payload: presence })) return;
@@ -306,15 +306,16 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     socket.send({ type: "request-game-state" });
   }
 
-  async function enableMotion() {
+  async function requestMotionAccess() {
     if (
-      typeof DeviceOrientationEvent === "undefined" &&
-      typeof DeviceMotionEvent === "undefined"
+      typeof DeviceOrientationEvent === "undefined"
     ) {
+      sensorStatusRef.current = "unsupported";
       setSensorStatus("unsupported");
-      return;
+      return false;
     }
 
+    sensorStatusRef.current = "requesting";
     setSensorStatus("requesting");
 
     try {
@@ -327,61 +328,39 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           permissionRequests.push(orientationEvent.requestPermission());
         }
       }
-      if (typeof DeviceMotionEvent !== "undefined") {
-        const motionEvent = DeviceMotionEvent as unknown as PermissionCapableEvent;
-        if (typeof motionEvent.requestPermission === "function") {
-          permissionRequests.push(motionEvent.requestPermission());
-        }
-      }
-
       const permissions = await Promise.all(permissionRequests);
       if (permissions.some((permission) => permission !== "granted")) {
+        sensorStatusRef.current = "denied";
         setSensorStatus("denied");
-        return;
+        return false;
       }
 
-      previousOrientationRef.current = null;
+      orientationOriginRef.current = null;
+      smoothedAimRef.current = { x: 0, y: 0 };
+      lastSentAimRef.current = { x: Number.NaN, y: Number.NaN };
       sensorStatusRef.current = "active";
       setSensorStatus("active");
-
-      socketRef.current?.send({
-        type: "player-update",
-        payload: {
-          kind: "player",
-          playerId,
-          name: nickname,
-          color: playerColor,
-          motionEnabled: true,
-          onlineAt: new Date().toISOString(),
-        },
-      });
+      return true;
     } catch {
+      sensorStatusRef.current = "denied";
       setSensorStatus("denied");
+      return false;
     }
   }
 
-  function pauseMotion() {
-    releaseGrab();
-    sensorStatusRef.current = "idle";
-    setSensorStatus("idle");
-    previousOrientationRef.current = null;
-
-    socketRef.current?.send({
-      type: "player-update",
-      payload: {
-        kind: "player",
-        playerId,
-        name: nickname,
-        color: playerColor,
-        motionEnabled: false,
-        onlineAt: new Date().toISOString(),
-      },
-    });
+  function recenter() {
+    orientationOriginRef.current = null;
+    smoothedAimRef.current = { x: 0, y: 0 };
+    lastSentAimRef.current = { x: Number.NaN, y: Number.NaN };
+    lastSentAtRef.current = 0;
+    socketRef.current?.send({ type: "recenter" });
   }
 
-  function recenter() {
-    previousOrientationRef.current = null;
-    socketRef.current?.send({ type: "recenter" });
+  function syncAimBeforePointerAction() {
+    const aim = smoothedAimRef.current;
+    lastSentAtRef.current = performance.now();
+    lastSentAimRef.current = aim;
+    socketRef.current?.send({ type: "cursor-aim", payload: aim });
   }
 
   function startGrab() {
@@ -389,6 +368,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     holdingRef.current = true;
     setIsHolding(true);
     setFeedback(null);
+    syncAimBeforePointerAction();
     socketRef.current?.send({ type: "pointer-down" });
   }
 
@@ -396,6 +376,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     if (!holdingRef.current) return;
     holdingRef.current = false;
     setIsHolding(false);
+    syncAimBeforePointerAction();
     socketRef.current?.send({ type: "pointer-up" });
   }
 
@@ -440,13 +421,33 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
               </div>
             )}
 
+            {(sensorStatus === "denied" || sensorStatus === "unsupported") && (
+              <div className="mt-3 flex items-start gap-2 rounded-xl bg-red-50 px-3 py-2.5 text-xs font-medium text-red-700">
+                <CircleAlert className="mt-0.5 size-4 shrink-0" />
+                {sensorStatus === "denied"
+                  ? "Motion access is required to join. Allow Motion & Orientation in your browser settings, then try again."
+                  : "This browser does not expose motion sensors. Try Safari or Chrome on your phone."}
+              </div>
+            )}
+
             <Button
               className="mt-4 h-14 w-full rounded-2xl bg-[#171922] text-base font-bold text-white hover:bg-[#252835]"
-              disabled={!nickname.trim() || !playerId || !hostOnline || status !== "connected"}
+              disabled={
+                !nickname.trim() ||
+                !playerId ||
+                !hostOnline ||
+                status !== "connected" ||
+                sensorStatus === "requesting"
+              }
               onClick={() => void joinRoom()}
             >
-              Join room
-              <ArrowRight className="ml-1 size-4" />
+              {sensorStatus === "requesting" ? (
+                <LoaderCircle className="mr-1 size-5 animate-spin" />
+              ) : (
+                <Move3d className="mr-1 size-5" />
+              )}
+              {sensorStatus === "requesting" ? "Starting AirMouse…" : "Join room"}
+              {sensorStatus !== "requesting" && <ArrowRight className="ml-1 size-4" />}
             </Button>
           </div>
         </div>
@@ -486,14 +487,8 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           <span className="player-eyebrow mt-7">You&apos;re in</span>
           <h1 className="mt-3 text-4xl font-black tracking-[-.04em]">Hey, {nickname}!</h1>
           <p className="mt-3 max-w-xs text-[#696c76]">
-            Enable motion now, then keep this phone pointed at the host screen.
+            AirMouse motion is active. Keep this phone pointed at the host screen.
           </p>
-
-          <MotionButton
-            sensorStatus={sensorStatus}
-            onEnable={() => void enableMotion()}
-            onPause={() => void pauseMotion()}
-          />
 
           <div className="mt-5 flex items-center gap-2 rounded-full border border-black/8 bg-white px-4 py-2.5 text-sm font-semibold shadow-sm">
             <LoaderCircle className="size-4 animate-spin text-[#ff6b4a]" />
@@ -528,27 +523,15 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           {question.prompt}
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-[#6d707a]">
-          Watch the shared screen. Tilt your phone to steer your colored cursor.
+          Point your phone at the shared screen to aim your colored cursor.
         </p>
 
-        {sensorStatus !== "active" ? (
-          <div className="my-7 rounded-[1.6rem] border border-black/8 bg-white p-5 text-center shadow-sm">
-            <Smartphone className="mx-auto size-9 text-[#ff6b4a]" />
-            <p className="mt-3 font-black">Motion control is paused</p>
-            <p className="mt-1 text-sm text-[#777a83]">Your browser needs sensor access to move the AirMouse.</p>
-            <MotionButton
-              sensorStatus={sensorStatus}
-              onEnable={() => void enableMotion()}
-              onPause={() => void pauseMotion()}
-            />
-          </div>
-        ) : (
-          <div className="my-6 flex flex-1 flex-col">
+        <div className="my-6 flex flex-1 flex-col">
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-2xl border border-black/8 bg-white/70 p-4">
                 <Move3d className="size-5 text-[#5c7cfa]" />
-                <p className="mt-3 text-sm font-black">Tilt to move</p>
-                <p className="mt-1 text-xs leading-relaxed text-[#858790]">Gyroscope + acceleration</p>
+                <p className="mt-3 text-sm font-black">Point to aim</p>
+                <p className="mt-1 text-xs leading-relaxed text-[#858790]">Orientation tracking</p>
               </div>
               <button
                 type="button"
@@ -596,16 +579,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
                 <span className="mt-1 text-xs font-semibold opacity-50">Watch your cursor on screen</span>
               </button>
             </div>
-
-            <Button
-              variant="outline"
-              className="h-11 rounded-xl border-black/10 bg-transparent text-[#686b75]"
-              onClick={() => void pauseMotion()}
-            >
-              <Pause className="mr-1 size-4" /> Pause motion
-            </Button>
           </div>
-        )}
 
         {feedback && (
           <div className={`rounded-2xl p-4 ${feedback.correct ? "bg-[#e4f8ef] text-[#087653]" : "bg-[#fff0ec] text-[#b43c25]"}`}>
@@ -619,57 +593,11 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
         {roundComplete && (
           <div className="mt-3 flex items-center gap-3 rounded-2xl bg-[#fff4cf] p-4 text-[#755509]">
             <Sparkles className="size-5" />
-            <p className="font-black">Round complete! Look at the host screen.</p>
+            <p className="font-black">Round complete! Steer your cursor into the next-question zone.</p>
           </div>
         )}
       </div>
     </PhoneShell>
-  );
-}
-
-function MotionButton({
-  sensorStatus,
-  onEnable,
-  onPause,
-}: {
-  sensorStatus: SensorStatus;
-  onEnable: () => void;
-  onPause: () => void;
-}) {
-  if (sensorStatus === "active") {
-    return (
-      <Button
-        variant="outline"
-        className="mt-7 h-14 rounded-2xl border-[#15a97b]/25 bg-[#e4f8ef] font-black text-[#087653] hover:bg-[#d9f3e9]"
-        onClick={onPause}
-      >
-        <Check className="mr-1 size-5" /> Motion ready
-      </Button>
-    );
-  }
-
-  return (
-    <div className="mt-7 w-full max-w-sm">
-      <Button
-        className="h-14 w-full rounded-2xl bg-[#171922] text-base font-black text-white hover:bg-[#252835]"
-        disabled={sensorStatus === "requesting"}
-        onClick={onEnable}
-      >
-        {sensorStatus === "requesting" ? (
-          <LoaderCircle className="mr-1 size-5 animate-spin" />
-        ) : (
-          <Move3d className="mr-1 size-5" />
-        )}
-        {sensorStatus === "requesting" ? "Requesting access…" : "Enable AirMouse motion"}
-      </Button>
-      {(sensorStatus === "denied" || sensorStatus === "unsupported") && (
-        <p className="mt-2 text-xs font-semibold text-red-600">
-          {sensorStatus === "denied"
-            ? "Motion access was denied. Allow Motion & Orientation in your browser settings."
-            : "This browser does not expose motion sensors. Try Safari or Chrome on your phone."}
-        </p>
-      )}
-    </div>
   );
 }
 

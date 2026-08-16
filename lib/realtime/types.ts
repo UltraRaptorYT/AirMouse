@@ -30,6 +30,12 @@ export type CursorMovePayload = {
   dy: number;
 };
 
+export type CursorAimPayload = {
+  playerId: string;
+  x: number;
+  y: number;
+};
+
 export type PointerActionPayload = {
   playerId: string;
 };
@@ -52,6 +58,7 @@ export type ClientRoomMessage =
   | { type: "join"; payload: PlayerPresence }
   | { type: "player-update"; payload: PlayerPresence }
   | { type: "request-game-state" }
+  | { type: "cursor-aim"; payload: Omit<CursorAimPayload, "playerId"> }
   | { type: "cursor-move"; payload: Omit<CursorMovePayload, "playerId"> }
   | { type: "pointer-down" }
   | { type: "pointer-up" }
@@ -65,6 +72,7 @@ export type ServerRoomMessage =
   | ({ type: "connected" } & RoomPresencePayload)
   | ({ type: "presence" } & RoomPresencePayload)
   | { type: "game-state"; payload: GameStatePayload }
+  | { type: "cursor-aim"; payload: CursorAimPayload }
   | { type: "cursor-move"; payload: CursorMovePayload }
   | { type: "pointer-down"; payload: PointerActionPayload }
   | { type: "pointer-up"; payload: PointerActionPayload }
