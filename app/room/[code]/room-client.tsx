@@ -37,8 +37,10 @@ type PermissionCapableEvent = {
 };
 
 const PLAYER_COLORS = ["#ff6b4a", "#5c7cfa", "#15a97b", "#b259e8", "#d89b22"];
-const ORIENTATION_SENSITIVITY = 5;
-const ACCELERATION_SENSITIVITY = 0.45;
+const HORIZONTAL_ORIENTATION_SENSITIVITY = 8;
+const VERTICAL_ORIENTATION_SENSITIVITY = 5;
+const HORIZONTAL_ACCELERATION_SENSITIVITY = 0.7;
+const VERTICAL_ACCELERATION_SENSITIVITY = 0.45;
 const SEND_INTERVAL_MS = 32;
 const DEAD_ZONE = 0.08;
 
@@ -209,15 +211,18 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
       if (!previous) return;
 
       addMovement(
-        -normalizeAngleDelta(current.alpha, previous.alpha) * ORIENTATION_SENSITIVITY,
-        -(current.beta - previous.beta) * ORIENTATION_SENSITIVITY,
+        -normalizeAngleDelta(current.alpha, previous.alpha) *
+          HORIZONTAL_ORIENTATION_SENSITIVITY,
+        -(current.beta - previous.beta) * VERTICAL_ORIENTATION_SENSITIVITY,
       );
     }
 
     function handleMotion(event: DeviceMotionEvent) {
       const acceleration = event.acceleration;
-      let dx = (acceleration?.x ?? 0) * ACCELERATION_SENSITIVITY;
-      let dy = -(acceleration?.y ?? 0) * ACCELERATION_SENSITIVITY;
+      let dx =
+        (acceleration?.x ?? 0) * HORIZONTAL_ACCELERATION_SENSITIVITY;
+      let dy =
+        -(acceleration?.y ?? 0) * VERTICAL_ACCELERATION_SENSITIVITY;
 
       if (performance.now() - lastOrientationAtRef.current > 250) {
         dx += -(event.rotationRate?.beta ?? 0) * 0.08;
