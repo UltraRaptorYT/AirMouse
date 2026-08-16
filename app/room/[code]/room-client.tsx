@@ -41,7 +41,7 @@ type PermissionCapableEvent = {
 const PLAYER_COLORS = ["#ff6b4a", "#5c7cfa", "#15a97b", "#b259e8", "#d89b22"];
 const HORIZONTAL_AIM_RANGE_DEGREES = 24;
 const VERTICAL_AIM_RANGE_DEGREES = 18;
-const AIM_SMOOTHING = 0.62;
+const AIM_SMOOTHING = 0.35;
 const SEND_INTERVAL_MS = 50;
 const AIM_CHANGE_THRESHOLD = 0.002;
 

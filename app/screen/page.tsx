@@ -1071,8 +1071,12 @@ function AirMouseCursors({
     return (
       <div
         key={player.playerId}
-        className="pointer-events-none fixed z-[100]"
-        style={{ left: cursor.x, top: cursor.y }}
+        className="pointer-events-none fixed left-0 top-0 z-[100]"
+        style={{
+          transform: `translate3d(${cursor.x}px, ${cursor.y}px, 0)`,
+          transition: "transform 80ms linear",
+          willChange: "transform",
+        }}
       >
         {heldAnswer && (
           <div className="absolute bottom-5 left-5 whitespace-nowrap rounded-xl bg-[#fffdf6] px-4 py-3 font-bold text-[#191b26] shadow-2xl ring-2 ring-white/70">
