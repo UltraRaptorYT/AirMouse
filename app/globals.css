@@ -128,3 +128,78 @@
     @apply font-sans;
   }
 }
+
+body {
+  min-width: 320px;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.game-shell {
+  background-image:
+    radial-gradient(circle at 15% 5%, rgba(92, 124, 250, 0.11), transparent 28rem),
+    radial-gradient(circle at 85% 100%, rgba(255, 107, 74, 0.09), transparent 32rem);
+}
+
+.host-panel {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1.75rem;
+  background: rgba(255, 255, 255, 0.035);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.eyebrow,
+.player-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.eyebrow {
+  border: 1px solid rgba(255, 107, 74, 0.28);
+  background: rgba(255, 107, 74, 0.09);
+  color: #ff927a;
+}
+
+.player-eyebrow {
+  background: rgba(255, 107, 74, 0.1);
+  color: #d94f34;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.16);
+  padding: 0.45rem 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.player-shell {
+  background-image:
+    radial-gradient(circle at 100% 0%, rgba(255, 107, 74, 0.12), transparent 20rem),
+    radial-gradient(circle at 0% 100%, rgba(92, 124, 250, 0.08), transparent 24rem);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

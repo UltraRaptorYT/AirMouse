@@ -1,11 +1,13 @@
 import { supabase } from "@/lib/supabase/client";
 
-export function getRoomChannel(roomCode: string) {
+export function getRoomChannel(roomCode: string, presenceKey?: string) {
   return supabase.channel(`airmouse:${roomCode}`, {
     config: {
       broadcast: {
         self: false,
+        ack: true,
       },
+      ...(presenceKey ? { presence: { key: presenceKey } } : {}),
     },
   });
 }
