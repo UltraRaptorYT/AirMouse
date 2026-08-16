@@ -1,4 +1,7 @@
-import type { ClientRoomMessage, ServerRoomMessage } from "@/lib/realtime/types";
+import type {
+  ClientRoomMessage,
+  ServerRoomMessage,
+} from "@/lib/realtime/types";
 
 export type RoomConnectionStatus =
   | "connecting"

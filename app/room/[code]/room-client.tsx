@@ -39,8 +39,8 @@ type PermissionCapableEvent = {
 };
 
 const PLAYER_COLORS = ["#ff6b4a", "#5c7cfa", "#15a97b", "#b259e8", "#d89b22"];
-const HORIZONTAL_AIM_RANGE_DEGREES = 18;
-const VERTICAL_AIM_RANGE_DEGREES = 14;
+const HORIZONTAL_AIM_RANGE_DEGREES = 24;
+const VERTICAL_AIM_RANGE_DEGREES = 18;
 const AIM_SMOOTHING = 0.62;
 const SEND_INTERVAL_MS = 50;
 const AIM_CHANGE_THRESHOLD = 0.002;
@@ -109,9 +109,12 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     const storedScore = Number(
       sessionStorage.getItem(`airmouse-score-${roomCode}`) ?? "0",
     );
-    const colorIndex = Math.abs(
-      id.split("").reduce((total, character) => total + character.charCodeAt(0), 0),
-    ) % PLAYER_COLORS.length;
+    const colorIndex =
+      Math.abs(
+        id
+          .split("")
+          .reduce((total, character) => total + character.charCodeAt(0), 0),
+      ) % PLAYER_COLORS.length;
     const color = PLAYER_COLORS[colorIndex];
 
     joinedRef.current = false;
@@ -246,9 +249,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           -normalizeAngleDelta(current.alpha, origin.alpha) /
             HORIZONTAL_AIM_RANGE_DEGREES,
         ),
-        y: clampAim(
-          -(current.beta - origin.beta) / VERTICAL_AIM_RANGE_DEGREES,
-        ),
+        y: clampAim(-(current.beta - origin.beta) / VERTICAL_AIM_RANGE_DEGREES),
       };
       const previousAim = smoothedAimRef.current;
       const nextAim = {
@@ -307,9 +308,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   }
 
   async function requestMotionAccess() {
-    if (
-      typeof DeviceOrientationEvent === "undefined"
-    ) {
+    if (typeof DeviceOrientationEvent === "undefined") {
       sensorStatusRef.current = "unsupported";
       setSensorStatus("unsupported");
       return false;
@@ -387,7 +386,9 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           <div className="mb-8">
             <span className="player-eyebrow">Room found</span>
             <h1 className="mt-4 text-4xl font-black leading-[.98] tracking-[-.045em]">
-              Pick a name.<br />Then you&apos;re in.
+              Pick a name.
+              <br />
+              Then you&apos;re in.
             </h1>
             <p className="mt-4 max-w-sm text-base leading-relaxed text-[#5f6370]">
               You came through the QR, so your room is already selected.
@@ -395,7 +396,10 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           </div>
 
           <div className="rounded-[1.75rem] border border-black/8 bg-white p-5 shadow-[0_22px_70px_rgba(28,27,36,.09)]">
-            <label htmlFor="nickname" className="text-sm font-bold text-[#30323c]">
+            <label
+              htmlFor="nickname"
+              className="text-sm font-bold text-[#30323c]"
+            >
               Your nickname
             </label>
             <div className="mt-2.5 flex items-center rounded-2xl border border-black/10 bg-[#f7f6f2] px-4 focus-within:border-[#ff6b4a]/60 focus-within:ring-4 focus-within:ring-[#ff6b4a]/10">
@@ -446,8 +450,12 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
               ) : (
                 <Move3d className="mr-1 size-5" />
               )}
-              {sensorStatus === "requesting" ? "Starting AirMouse…" : "Join room"}
-              {sensorStatus !== "requesting" && <ArrowRight className="ml-1 size-4" />}
+              {sensorStatus === "requesting"
+                ? "Starting AirMouse…"
+                : "Join room"}
+              {sensorStatus !== "requesting" && (
+                <ArrowRight className="ml-1 size-4" />
+              )}
             </Button>
           </div>
         </div>
@@ -463,11 +471,19 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
             <Trophy className="size-9" />
           </div>
           <span className="player-eyebrow mt-7">Game complete</span>
-          <h1 className="mt-3 text-5xl font-black tracking-[-.05em]">Nice flying!</h1>
-          <p className="mt-4 text-[#6b6e78]">Look at the host screen for the final leaderboard.</p>
+          <h1 className="mt-3 text-5xl font-black tracking-[-.05em]">
+            Nice flying!
+          </h1>
+          <p className="mt-4 text-[#6b6e78]">
+            Look at the host screen for the final leaderboard.
+          </p>
           <div className="mt-8 rounded-2xl border border-black/8 bg-white px-8 py-5 shadow-sm">
-            <p className="text-xs font-bold uppercase tracking-[.18em] text-[#9a9ca3]">Your score</p>
-            <p className="mt-1 font-mono text-4xl font-black">{totalScore.toLocaleString()}</p>
+            <p className="text-xs font-bold uppercase tracking-[.18em] text-[#9a9ca3]">
+              Your score
+            </p>
+            <p className="mt-1 font-mono text-4xl font-black">
+              {totalScore.toLocaleString()}
+            </p>
           </div>
         </div>
       </PhoneShell>
@@ -485,9 +501,12 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
             {nickname.charAt(0).toUpperCase()}
           </div>
           <span className="player-eyebrow mt-7">You&apos;re in</span>
-          <h1 className="mt-3 text-4xl font-black tracking-[-.04em]">Hey, {nickname}!</h1>
+          <h1 className="mt-3 text-4xl font-black tracking-[-.04em]">
+            Hey, {nickname}!
+          </h1>
           <p className="mt-3 max-w-xs text-[#696c76]">
-            AirMouse motion is active. Keep this phone pointed at the host screen.
+            AirMouse motion is active. Keep this phone pointed at the host
+            screen.
           </p>
 
           <div className="mt-5 flex items-center gap-2 rounded-full border border-black/8 bg-white px-4 py-2.5 text-sm font-semibold shadow-sm">
@@ -506,16 +525,22 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     <PhoneShell roomCode={roomCode} status={status} score={totalScore}>
       <div className="flex flex-1 flex-col pb-6 pt-5">
         <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[.15em] text-[#90929a]">
-          <span>Question {gameState.questionIndex + 1}/{gameState.questionCount}</span>
+          <span>
+            Question {gameState.questionIndex + 1}/{gameState.questionCount}
+          </span>
           <span className="flex items-center gap-1.5">
-            <span className={`size-2 rounded-full ${sensorStatus === "active" ? "bg-[#15a97b]" : "bg-amber-500"}`} />
+            <span
+              className={`size-2 rounded-full ${sensorStatus === "active" ? "bg-[#15a97b]" : "bg-amber-500"}`}
+            />
             {sensorStatus === "active" ? "Motion live" : "Motion off"}
           </span>
         </div>
         <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/8">
           <div
             className="h-full rounded-full bg-[#ff6b4a] transition-[width] duration-300"
-            style={{ width: `${((gameState.questionIndex + 1) / gameState.questionCount) * 100}%` }}
+            style={{
+              width: `${((gameState.questionIndex + 1) / gameState.questionCount) * 100}%`,
+            }}
           />
         </div>
 
@@ -527,64 +552,81 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
         </p>
 
         <div className="my-6 flex flex-1 flex-col">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-2xl border border-black/8 bg-white/70 p-4">
-                <Move3d className="size-5 text-[#5c7cfa]" />
-                <p className="mt-3 text-sm font-black">Point to aim</p>
-                <p className="mt-1 text-xs leading-relaxed text-[#858790]">Orientation tracking</p>
-              </div>
-              <button
-                type="button"
-                className="rounded-2xl border border-black/8 bg-white/70 p-4 text-left active:scale-[.98]"
-                onClick={recenter}
-              >
-                <Crosshair className="size-5 text-[#15a97b]" />
-                <p className="mt-3 text-sm font-black">Recenter</p>
-                <p className="mt-1 text-xs leading-relaxed text-[#858790]">Reset cursor position</p>
-              </button>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-2xl border border-black/8 bg-white/70 p-4">
+              <Move3d className="size-5 text-[#5c7cfa]" />
+              <p className="mt-3 text-sm font-black">Point to aim</p>
+              <p className="mt-1 text-xs leading-relaxed text-[#858790]">
+                Orientation tracking
+              </p>
             </div>
-
-            <div className="flex flex-1 items-center justify-center py-6">
-              <button
-                type="button"
-                aria-label="Hold to grab an answer card and release to drop it"
-                className={`flex aspect-square w-full max-w-[260px] touch-none select-none flex-col items-center justify-center rounded-full border-[10px] font-black shadow-[0_24px_60px_rgba(23,25,34,.18)] transition active:scale-[.97] ${
-                  isHolding
-                    ? "border-[#ffb29f] bg-[#ff6b4a] text-white"
-                    : "border-white bg-[#171922] text-white"
-                }`}
-                onPointerDown={(event) => {
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  startGrab();
-                }}
-                onPointerUp={(event) => {
-                  if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                    event.currentTarget.releasePointerCapture(event.pointerId);
-                  }
-                  releaseGrab();
-                }}
-                onPointerCancel={releaseGrab}
-                onKeyDown={(event) => {
-                  if ((event.key === " " || event.key === "Enter") && !event.repeat) {
-                    event.preventDefault();
-                    startGrab();
-                  }
-                }}
-                onKeyUp={(event) => {
-                  if (event.key === " " || event.key === "Enter") releaseGrab();
-                }}
-              >
-                <Hand className={`size-14 ${isHolding ? "fill-white/20" : ""}`} />
-                <span className="mt-3 text-xl">{isHolding ? "Release to drop" : "Hold to grab"}</span>
-                <span className="mt-1 text-xs font-semibold opacity-50">Watch your cursor on screen</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              className="rounded-2xl border border-black/8 bg-white/70 p-4 text-left active:scale-[.98]"
+              onClick={recenter}
+            >
+              <Crosshair className="size-5 text-[#15a97b]" />
+              <p className="mt-3 text-sm font-black">Recenter</p>
+              <p className="mt-1 text-xs leading-relaxed text-[#858790]">
+                Reset cursor position
+              </p>
+            </button>
           </div>
 
+          <div className="flex flex-1 items-center justify-center py-6">
+            <button
+              type="button"
+              aria-label="Hold to grab an answer card and release to drop it"
+              className={`flex aspect-square w-full max-w-[260px] touch-none select-none flex-col items-center justify-center rounded-full border-[10px] font-black shadow-[0_24px_60px_rgba(23,25,34,.18)] transition active:scale-[.97] ${
+                isHolding
+                  ? "border-[#ffb29f] bg-[#ff6b4a] text-white"
+                  : "border-white bg-[#171922] text-white"
+              }`}
+              onPointerDown={(event) => {
+                event.currentTarget.setPointerCapture(event.pointerId);
+                startGrab();
+              }}
+              onPointerUp={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                }
+                releaseGrab();
+              }}
+              onPointerCancel={releaseGrab}
+              onKeyDown={(event) => {
+                if (
+                  (event.key === " " || event.key === "Enter") &&
+                  !event.repeat
+                ) {
+                  event.preventDefault();
+                  startGrab();
+                }
+              }}
+              onKeyUp={(event) => {
+                if (event.key === " " || event.key === "Enter") releaseGrab();
+              }}
+            >
+              <Hand className={`size-14 ${isHolding ? "fill-white/20" : ""}`} />
+              <span className="mt-3 text-xl">
+                {isHolding ? "Release to drop" : "Hold to grab"}
+              </span>
+              <span className="mt-1 text-xs font-semibold opacity-50">
+                Watch your cursor on screen
+              </span>
+            </button>
+          </div>
+        </div>
+
         {feedback && (
-          <div className={`rounded-2xl p-4 ${feedback.correct ? "bg-[#e4f8ef] text-[#087653]" : "bg-[#fff0ec] text-[#b43c25]"}`}>
+          <div
+            className={`rounded-2xl p-4 ${feedback.correct ? "bg-[#e4f8ef] text-[#087653]" : "bg-[#fff0ec] text-[#b43c25]"}`}
+          >
             <div className="flex items-center gap-3">
-              {feedback.correct ? <Check className="size-5" /> : <X className="size-5" />}
+              {feedback.correct ? (
+                <Check className="size-5" />
+              ) : (
+                <X className="size-5" />
+              )}
               <p className="font-black">{feedback.message}</p>
             </div>
           </div>
@@ -593,7 +635,9 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
         {roundComplete && (
           <div className="mt-3 flex items-center gap-3 rounded-2xl bg-[#fff4cf] p-4 text-[#755509]">
             <Sparkles className="size-5" />
-            <p className="font-black">Round complete! Steer your cursor into the next-question zone.</p>
+            <p className="font-black">
+              Round complete! Steer your cursor into the next-question zone.
+            </p>
           </div>
         )}
       </div>

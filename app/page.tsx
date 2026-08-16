@@ -34,7 +34,9 @@ export default function HomePage() {
             <span className="flex size-10 items-center justify-center rounded-2xl bg-[#ff6b4a] shadow-[0_10px_30px_rgba(255,107,74,.25)]">
               <Gamepad2 className="size-5" />
             </span>
-            <strong className="text-xl font-black tracking-[-.04em]">AirMouse</strong>
+            <strong className="text-xl font-black tracking-[-.04em]">
+              AirMouse
+            </strong>
           </div>
 
           <Button
@@ -51,10 +53,14 @@ export default function HomePage() {
           <section>
             <span className="eyebrow">Multiplayer sorting game</span>
             <h1 className="mt-6 max-w-3xl text-balance text-5xl font-black leading-[.92] tracking-[-.055em] sm:text-7xl lg:text-[5.4rem]">
-              Think fast.<br />Drag smart.
+              Think fast.
+              <br />
+              Drag smart.
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-relaxed text-white/55">
-              Scan the host&apos;s QR code, use your phone as a motion controller, and race your friends to fly every answer into the right box.
+              Scan the host&apos;s QR code, use your phone as a motion
+              controller, and race your friends to fly every answer into the
+              right box.
             </p>
 
             <div className="mt-9 grid max-w-xl grid-cols-3 gap-3">
@@ -65,10 +71,15 @@ export default function HomePage() {
               ].map(([Icon, label], index) => {
                 const StepIcon = Icon as typeof QrCode;
                 return (
-                  <div key={label as string} className="rounded-2xl border border-white/8 bg-white/[.035] p-4">
+                  <div
+                    key={label as string}
+                    className="rounded-2xl border border-white/8 bg-white/[.035] p-4"
+                  >
                     <div className="mb-5 flex items-center justify-between">
                       <StepIcon className="size-5 text-[#ff7c61]" />
-                      <span className="font-mono text-xs text-white/20">0{index + 1}</span>
+                      <span className="font-mono text-xs text-white/20">
+                        0{index + 1}
+                      </span>
                     </div>
                     <p className="font-bold">{label as string}</p>
                   </div>
@@ -86,12 +97,17 @@ export default function HomePage() {
                 </span>
                 <div>
                   <p className="font-bold">Can&apos;t scan the QR?</p>
-                  <p className="text-sm text-white/40">Join manually with the room code</p>
+                  <p className="text-sm text-white/40">
+                    Join manually with the room code
+                  </p>
                 </div>
               </div>
 
               <div className="mt-8">
-                <label htmlFor="room" className="text-xs font-bold uppercase tracking-[.18em] text-white/40">
+                <label
+                  htmlFor="room"
+                  className="text-xs font-bold uppercase tracking-[.18em] text-white/40"
+                >
                   Room code
                 </label>
                 <Input
@@ -105,7 +121,9 @@ export default function HomePage() {
                   className="mt-2.5 h-16 rounded-2xl border-white/10 bg-black/20 text-center font-mono text-2xl font-bold uppercase tracking-[.28em] text-white placeholder:text-white/15 focus-visible:border-[#ff6b4a]/60 focus-visible:ring-[#ff6b4a]/15"
                   onChange={(event) =>
                     setRoomCode(
-                      event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""),
+                      event.target.value
+                        .toUpperCase()
+                        .replace(/[^A-Z0-9]/g, ""),
                     )
                   }
                   onKeyDown={(event) => {
@@ -124,7 +142,9 @@ export default function HomePage() {
               </Button>
 
               <div className="mt-7 border-t border-white/8 pt-6 text-center text-xs leading-relaxed text-white/30">
-                If you can scan, use the QR on the host screen.<br />It takes you straight to your room.
+                If you can scan, use the QR on the host screen.
+                <br />
+                It takes you straight to your room.
               </div>
             </div>
           </section>

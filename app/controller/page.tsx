@@ -7,7 +7,10 @@ export default async function ControllerRedirect({
 }) {
   const params = await searchParams;
   const rawRoom = Array.isArray(params.room) ? params.room[0] : params.room;
-  const roomCode = rawRoom?.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
+  const roomCode = rawRoom
+    ?.toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 6);
 
   redirect(roomCode ? `/room/${roomCode}` : "/");
 }

@@ -7,5 +7,12 @@ export default async function RoomPage({
 }) {
   const { code } = await params;
 
-  return <RoomClient roomCode={code.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6)} />;
+  return (
+    <RoomClient
+      roomCode={code
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, "")
+        .slice(0, 6)}
+    />
+  );
 }

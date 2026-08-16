@@ -147,7 +147,9 @@ export default function ScreenPage() {
       );
 
       nextPlayers.forEach((player) => {
-        const removalTimer = playerRemovalTimersRef.current.get(player.playerId);
+        const removalTimer = playerRemovalTimersRef.current.get(
+          player.playerId,
+        );
         if (removalTimer !== undefined) window.clearTimeout(removalTimer);
         playerRemovalTimersRef.current.delete(player.playerId);
         mergedPlayers.set(player.playerId, player);
@@ -190,8 +192,8 @@ export default function ScreenPage() {
       const activeQuestion = gameStateRef.current.question;
       const roundIsComplete = Boolean(
         activeQuestion &&
-          Object.keys(solvedAnswersRef.current).length ===
-            activeQuestion.answers.length,
+        Object.keys(solvedAnswersRef.current).length ===
+          activeQuestion.answers.length,
       );
       const readyZone = roundIsComplete
         ? document.querySelector<HTMLElement>("[data-next-zone]")
@@ -199,10 +201,10 @@ export default function ScreenPage() {
       const bounds = readyZone?.getBoundingClientRect();
       const isReady = Boolean(
         bounds &&
-          cursor.x >= bounds.left &&
-          cursor.x <= bounds.right &&
-          cursor.y >= bounds.top &&
-          cursor.y <= bounds.bottom,
+        cursor.x >= bounds.left &&
+        cursor.x <= bounds.right &&
+        cursor.y >= bounds.top &&
+        cursor.y <= bounds.bottom,
       );
       const wasReady = readyPlayersRef.current.has(playerId);
       if (isReady === wasReady) return;
@@ -214,7 +216,9 @@ export default function ScreenPage() {
       setReadyPlayerIds([...nextReadyPlayers]);
       setLastActions((current) => ({
         ...current,
-        [playerId]: isReady ? "Ready for next question" : "Move to the launch zone",
+        [playerId]: isReady
+          ? "Ready for next question"
+          : "Move to the launch zone",
       }));
     }
 
@@ -324,7 +328,9 @@ export default function ScreenPage() {
           .elementFromPoint(cursor.x, cursor.y)
           ?.closest<HTMLElement>("[data-answer-target]");
         const targetId = targetElement?.dataset.answerTarget;
-        const answer = activeQuestion.answers.find((item) => item.id === answerId);
+        const answer = activeQuestion.answers.find(
+          (item) => item.id === answerId,
+        );
         const correct = Boolean(targetId && answer?.targetId === targetId);
         const player = playersRef.current.find(
           (item) => item.playerId === action.playerId,
@@ -356,7 +362,9 @@ export default function ScreenPage() {
           setSolvedAnswers(nextSolved);
           setScores(nextScores);
 
-          if (Object.keys(nextSolved).length === activeQuestion.answers.length) {
+          if (
+            Object.keys(nextSolved).length === activeQuestion.answers.length
+          ) {
             socketRef.current?.send({
               type: "round-complete",
               payload: { questionId: activeQuestion.id },
@@ -366,7 +374,9 @@ export default function ScreenPage() {
 
         setLastActions((current) => ({
           ...current,
-          [action.playerId]: correct ? `Correct! +${points}` : "Try another box",
+          [action.playerId]: correct
+            ? `Correct! +${points}`
+            : "Try another box",
         }));
 
         const result: DropResultPayload = {
@@ -455,27 +465,30 @@ export default function ScreenPage() {
     socketRef.current?.send({ type: "game-state", payload: nextState });
   }, []);
 
-  const startQuestion = useCallback((index: number) => {
-    const question = questionBank[index];
-    if (!question) return;
+  const startQuestion = useCallback(
+    (index: number) => {
+      const question = questionBank[index];
+      if (!question) return;
 
-    solvedAnswersRef.current = {};
-    draggingRef.current = {};
-    readyPlayersRef.current = new Set();
-    setSolvedAnswers({});
-    setDragging({});
-    setReadyPlayerIds([]);
-    setCountdown(null);
-    setLastActions({});
+      solvedAnswersRef.current = {};
+      draggingRef.current = {};
+      readyPlayersRef.current = new Set();
+      setSolvedAnswers({});
+      setDragging({});
+      setReadyPlayerIds([]);
+      setCountdown(null);
+      setLastActions({});
 
-    broadcastState({
-      phase: "question",
-      question: toPublicQuestion(question),
-      questionIndex: index,
-      questionCount: questionBank.length,
-      startedAt: Date.now(),
-    });
-  }, [broadcastState]);
+      broadcastState({
+        phase: "question",
+        question: toPublicQuestion(question),
+        questionIndex: index,
+        questionCount: questionBank.length,
+        startedAt: Date.now(),
+      });
+    },
+    [broadcastState],
+  );
 
   const goNext = useCallback(() => {
     const nextIndex = gameStateRef.current.questionIndex + 1;
@@ -526,7 +539,8 @@ export default function ScreenPage() {
 
   const solvedCount = Object.keys(solvedAnswers).length;
   const activeAnswerCount = gameState.question?.answers.length ?? 0;
-  const roundComplete = activeAnswerCount > 0 && solvedCount === activeAnswerCount;
+  const roundComplete =
+    activeAnswerCount > 0 && solvedCount === activeAnswerCount;
   const allPlayersReady =
     roundComplete &&
     players.length > 0 &&
@@ -600,8 +614,8 @@ export default function ScreenPage() {
                       Ready to sort it out?
                     </h1>
                     <p className="max-w-lg text-base leading-relaxed text-white/60 sm:text-lg">
-                      Scan the code, choose a nickname, and you&apos;re in this room.
-                      No room code screen in between.
+                      Scan the code, choose a nickname, and you&apos;re in this
+                      room. No room code screen in between.
                     </p>
                   </div>
 
@@ -635,8 +649,12 @@ export default function ScreenPage() {
               {players.length === 0 ? (
                 <div className="flex h-full min-h-44 flex-col items-center justify-center rounded-2xl border border-dashed border-white/15 bg-white/[.025] text-center">
                   <Smartphone className="mb-3 size-8 text-white/25" />
-                  <p className="font-semibold text-white/70">Waiting for players</p>
-                  <p className="mt-1 text-sm text-white/35">Names will pop up here</p>
+                  <p className="font-semibold text-white/70">
+                    Waiting for players
+                  </p>
+                  <p className="mt-1 text-sm text-white/35">
+                    Names will pop up here
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-2.5">
@@ -651,11 +669,19 @@ export default function ScreenPage() {
                       >
                         {player.name.charAt(0).toUpperCase()}
                       </span>
-                      <span className="flex-1 font-semibold">{player.name}</span>
-                      <span className={`text-xs font-bold ${player.motionEnabled ? "text-[#44d79b]" : "text-white/30"}`}>
-                        {player.motionEnabled ? "Motion ready" : "Connecting motion…"}
+                      <span className="flex-1 font-semibold">
+                        {player.name}
                       </span>
-                      {index === 0 && <Sparkles className="size-4 text-[#ffd166]" />}
+                      <span
+                        className={`text-xs font-bold ${player.motionEnabled ? "text-[#44d79b]" : "text-white/30"}`}
+                      >
+                        {player.motionEnabled
+                          ? "Motion ready"
+                          : "Connecting motion…"}
+                      </span>
+                      {index === 0 && (
+                        <Sparkles className="size-4 text-[#ffd166]" />
+                      )}
                     </div>
                   ))}
                 </div>
@@ -690,7 +716,9 @@ export default function ScreenPage() {
 
           <div className="mt-10 w-full max-w-2xl space-y-3">
             {rankedPlayers.length === 0 ? (
-              <p className="rounded-2xl bg-white/5 p-6 text-white/50">No scores yet.</p>
+              <p className="rounded-2xl bg-white/5 p-6 text-white/50">
+                No scores yet.
+              </p>
             ) : (
               rankedPlayers.map((player, index) => (
                 <div
@@ -710,9 +738,13 @@ export default function ScreenPage() {
                   >
                     {player.name.charAt(0).toUpperCase()}
                   </span>
-                  <span className="flex-1 text-lg font-bold">{player.name}</span>
+                  <span className="flex-1 text-lg font-bold">
+                    {player.name}
+                  </span>
                   {index === 0 && <Crown className="size-5 text-[#ffd166]" />}
-                  <strong className="font-mono text-xl">{player.score.toLocaleString()}</strong>
+                  <strong className="font-mono text-xl">
+                    {player.score.toLocaleString()}
+                  </strong>
                 </div>
               ))
             )}
@@ -747,7 +779,8 @@ export default function ScreenPage() {
             <div>
               <p className="text-sm text-white/45">Cards sorted</p>
               <p className="mt-1 text-3xl font-black">
-                {solvedCount}<span className="text-white/25">/{activeAnswerCount}</span>
+                {solvedCount}
+                <span className="text-white/25">/{activeAnswerCount}</span>
               </p>
             </div>
             <div className="flex size-12 items-center justify-center rounded-2xl bg-[#44d79b]/10 text-[#44d79b]">
@@ -770,9 +803,15 @@ export default function ScreenPage() {
                     className={`size-2.5 rounded-full ${isReady ? "ring-4 ring-[#44d79b]/15" : ""}`}
                     style={{ backgroundColor: player.color }}
                   />
-                  <span className="min-w-0 flex-1 truncate font-semibold">{player.name}</span>
-                  <span className={`text-right text-xs ${isReady ? "font-bold text-[#44d79b]" : "text-white/35"}`}>
-                    {isReady ? "Ready" : lastActions[player.playerId] ?? "Move your cursor"}
+                  <span className="min-w-0 flex-1 truncate font-semibold">
+                    {player.name}
+                  </span>
+                  <span
+                    className={`text-right text-xs ${isReady ? "font-bold text-[#44d79b]" : "text-white/35"}`}
+                  >
+                    {isReady
+                      ? "Ready"
+                      : (lastActions[player.playerId] ?? "Move your cursor")}
                   </span>
                   <strong className="min-w-12 text-right font-mono text-sm">
                     {entry?.score ?? 0}
@@ -804,7 +843,9 @@ export default function ScreenPage() {
                   <span className="font-mono text-6xl font-black text-[#44d79b]">
                     {countdown}
                   </span>
-                  <span className="mt-1 text-sm font-bold text-white/65">Launching next question…</span>
+                  <span className="mt-1 text-sm font-bold text-white/65">
+                    Launching next question…
+                  </span>
                 </>
               ) : (
                 <>
@@ -855,8 +896,12 @@ function HostShell({
               <Gamepad2 className="size-5" />
             </span>
             <div>
-              <p className="text-lg font-black leading-none tracking-[-.03em]">AirMouse</p>
-              <p className="mt-1 text-[10px] font-bold uppercase tracking-[.22em] text-white/35">Host screen</p>
+              <p className="text-lg font-black leading-none tracking-[-.03em]">
+                AirMouse
+              </p>
+              <p className="mt-1 text-[10px] font-bold uppercase tracking-[.22em] text-white/35">
+                Host screen
+              </p>
             </div>
           </div>
 
@@ -895,12 +940,16 @@ function QuestionStage({
   if (!question) return null;
 
   const heldAnswerIds = new Set(Object.values(dragging));
-  const playerLookup = new Map(players.map((player) => [player.playerId, player]));
+  const playerLookup = new Map(
+    players.map((player) => [player.playerId, player]),
+  );
 
   return (
     <section className="host-panel flex flex-col overflow-hidden p-6 sm:p-8">
       <div className="flex items-center justify-between">
-        <span className="eyebrow">Question {questionIndex + 1} of {questionCount}</span>
+        <span className="eyebrow">
+          Question {questionIndex + 1} of {questionCount}
+        </span>
         <span className="flex items-center gap-2 text-sm text-white/35">
           <MousePointer2 className="size-4" /> AirMouse controls active
         </span>
@@ -912,10 +961,13 @@ function QuestionStage({
         {question.instruction}
       </p>
       <p className="mt-1 text-sm text-white/45">
-        Drag every card — hold Grab over a large card, steer it to a box, then release.
+        Drag every card — hold Grab over a large card, steer it to a box, then
+        release.
       </p>
 
-      <div className={`mt-5 grid flex-1 content-center gap-4 ${question.targets.length === 3 ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
+      <div
+        className={`mt-5 grid flex-1 content-center gap-4 ${question.targets.length === 3 ? "md:grid-cols-3" : "md:grid-cols-2"}`}
+      >
         {question.targets.map((target, index) => {
           const placedAnswers = question.answers.filter(
             (answer) => solvedAnswers[answer.id]?.targetId === target.id,
@@ -941,15 +993,19 @@ function QuestionStage({
                   </span>
                 ) : (
                   placedAnswers.map((answer) => {
-                    const owner = playerLookup.get(solvedAnswers[answer.id].playerId);
+                    const owner = playerLookup.get(
+                      solvedAnswers[answer.id].playerId,
+                    );
                     return (
                       <span
                         key={answer.id}
-                      className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-[#fffdf6] px-4 py-3 text-lg font-bold text-[#191b26] shadow-lg"
+                        className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-[#fffdf6] px-4 py-3 text-lg font-bold text-[#191b26] shadow-lg"
                       >
                         <span
                           className="size-2 rounded-full"
-                          style={{ backgroundColor: owner?.color ?? FALLBACK_COLOR }}
+                          style={{
+                            backgroundColor: owner?.color ?? FALLBACK_COLOR,
+                          }}
                         />
                         {answer.label}
                       </span>
@@ -966,7 +1022,8 @@ function QuestionStage({
         <div className="flex flex-wrap justify-center gap-3">
           {question.answers
             .filter(
-              (answer) => !solvedAnswers[answer.id] && !heldAnswerIds.has(answer.id),
+              (answer) =>
+                !solvedAnswers[answer.id] && !heldAnswerIds.has(answer.id),
             )
             .map((answer) => (
               <span
@@ -978,7 +1035,8 @@ function QuestionStage({
               </span>
             ))}
           {question.answers.every(
-            (answer) => solvedAnswers[answer.id] || heldAnswerIds.has(answer.id),
+            (answer) =>
+              solvedAnswers[answer.id] || heldAnswerIds.has(answer.id),
           ) && (
             <span className="px-2 py-2 text-sm font-semibold text-white/35">
               All cards are being sorted
@@ -1004,7 +1062,9 @@ function AirMouseCursors({
   return players.map((player) => {
     const cursor = cursors[player.playerId];
     const heldAnswerId = dragging[player.playerId];
-    const heldAnswer = question?.answers.find((answer) => answer.id === heldAnswerId);
+    const heldAnswer = question?.answers.find(
+      (answer) => answer.id === heldAnswerId,
+    );
 
     if (!cursor) return null;
 
