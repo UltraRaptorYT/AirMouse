@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { RealtimeChannel } from "@supabase/supabase-js";
 import {
   ArrowRight,
   Check,
@@ -22,14 +21,19 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { getRoomChannel } from "@/lib/realtime/room";
+import {
+  createRoomSocket,
+  type RoomConnectionStatus,
+  type RoomSocket,
+} from "@/lib/realtime/room";
 import type {
   DropResultPayload,
   GameStatePayload,
+  PlayerPresence,
+  ServerRoomMessage,
 } from "@/lib/realtime/types";
-import { supabase } from "@/lib/supabase/client";
 
-type ConnectionStatus = "connecting" | "connected" | "error";
+type ConnectionStatus = RoomConnectionStatus;
 type SensorStatus = "idle" | "requesting" | "active" | "denied" | "unsupported";
 type OrientationReading = { alpha: number; beta: number };
 type PermissionCapableEvent = {
@@ -41,7 +45,7 @@ const HORIZONTAL_ORIENTATION_SENSITIVITY = 8;
 const VERTICAL_ORIENTATION_SENSITIVITY = 5;
 const HORIZONTAL_ACCELERATION_SENSITIVITY = 0.7;
 const VERTICAL_ACCELERATION_SENSITIVITY = 0.45;
-const SEND_INTERVAL_MS = 32;
+const SEND_INTERVAL_MS = 50;
 const DEAD_ZONE = 0.08;
 
 function makePlayerId(roomCode: string) {
@@ -52,11 +56,6 @@ function makePlayerId(roomCode: string) {
   const created = crypto.randomUUID();
   sessionStorage.setItem(storageKey, created);
   return created;
-}
-
-function hasHost(channel: RealtimeChannel) {
-  return (Object.values(channel.presenceState()).flat() as Array<Record<string, unknown>>)
-    .some((presence) => presence.kind === "host");
 }
 
 function normalizeAngleDelta(current: number, previous: number) {
@@ -89,12 +88,16 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     questionCount: 0,
   });
 
-  const channelRef = useRef<RealtimeChannel | null>(null);
+  const socketRef = useRef<RoomSocket | null>(null);
   const previousOrientationRef = useRef<OrientationReading | null>(null);
   const lastOrientationAtRef = useRef(0);
   const movementBufferRef = useRef({ dx: 0, dy: 0 });
   const lastSentAtRef = useRef(0);
   const holdingRef = useRef(false);
+  const joinedRef = useRef(false);
+  const nicknameRef = useRef("");
+  const playerColorRef = useRef(PLAYER_COLORS[0]);
+  const sensorStatusRef = useRef<SensorStatus>("idle");
   const currentQuestionIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
@@ -102,25 +105,37 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
     const id = makePlayerId(roomCode);
     const storedName = localStorage.getItem("airmouse-nickname") ?? "";
+    const wasJoined =
+      Boolean(storedName) &&
+      sessionStorage.getItem(`airmouse-joined-${roomCode}`) === "true";
+    const storedScore = Number(
+      sessionStorage.getItem(`airmouse-score-${roomCode}`) ?? "0",
+    );
     const colorIndex = Math.abs(
       id.split("").reduce((total, character) => total + character.charCodeAt(0), 0),
     ) % PLAYER_COLORS.length;
+    const color = PLAYER_COLORS[colorIndex];
+
+    joinedRef.current = wasJoined;
+    nicknameRef.current = storedName;
+    playerColorRef.current = color;
 
     const hydrationTimer = window.setTimeout(() => {
       setPlayerId(id);
       setNickname(storedName);
-      setPlayerColor(PLAYER_COLORS[colorIndex]);
+      setPlayerColor(color);
+      setJoined(wasJoined);
+      if (Number.isFinite(storedScore)) setTotalScore(storedScore);
     }, 0);
 
-    const channel = getRoomChannel(roomCode, `player-${id}`);
-    channelRef.current = channel;
+    function handleMessage(message: ServerRoomMessage) {
+      if (message.type === "connected" || message.type === "presence") {
+        setHostOnline(message.hostOnline);
+        return;
+      }
 
-    channel
-      .on("presence", { event: "sync" }, () => {
-        setHostOnline(hasHost(channel));
-      })
-      .on("broadcast", { event: "game-state" }, ({ payload }) => {
-        const nextState = payload as GameStatePayload;
+      if (message.type === "game-state") {
+        const nextState = message.payload;
         const nextQuestionId = nextState.question?.id;
 
         if (nextQuestionId !== currentQuestionIdRef.current) {
@@ -132,44 +147,59 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
         }
 
         setGameState(nextState);
-      })
-      .on("broadcast", { event: "drop-result" }, ({ payload }) => {
-        const result = payload as DropResultPayload;
+        return;
+      }
+
+      if (message.type === "drop-result") {
+        const result: DropResultPayload = message.payload;
         if (result.playerId !== id) return;
 
         setTotalScore(result.totalScore);
+        sessionStorage.setItem(
+          `airmouse-score-${roomCode}`,
+          String(result.totalScore),
+        );
         setFeedback({
           correct: result.correct,
           message: result.correct
             ? `Correct box! +${result.points} points`
             : "Not that box — try again",
         });
-      })
-      .on("broadcast", { event: "round-complete" }, () => {
-        setRoundComplete(true);
-      })
-      .subscribe((subscriptionStatus) => {
-        if (subscriptionStatus === "SUBSCRIBED") {
-          setStatus("connected");
-          void channel.send({
-            type: "broadcast",
-            event: "request-game-state",
-            payload: { playerId: id },
-          });
-        }
+        return;
+      }
 
-        if (
-          subscriptionStatus === "CHANNEL_ERROR" ||
-          subscriptionStatus === "TIMED_OUT"
-        ) {
-          setStatus("error");
+      if (message.type === "round-complete") {
+        setRoundComplete(true);
+      }
+    }
+
+    const socket = createRoomSocket({
+      roomCode,
+      role: "player",
+      clientId: id,
+      onStatus: setStatus,
+      onMessage: handleMessage,
+      onOpen: () => {
+        if (joinedRef.current) {
+          const presence: PlayerPresence = {
+            kind: "player",
+            playerId: id,
+            name: nicknameRef.current,
+            color: playerColorRef.current,
+            motionEnabled: sensorStatusRef.current === "active",
+            onlineAt: new Date().toISOString(),
+          };
+          socketRef.current?.send({ type: "join", payload: presence });
         }
-      });
+        socketRef.current?.send({ type: "request-game-state" });
+      },
+    });
+    socketRef.current = socket;
 
     return () => {
       window.clearTimeout(hydrationTimer);
-      void supabase.removeChannel(channel);
-      channelRef.current = null;
+      socket.close();
+      socketRef.current = null;
     };
   }, [roomCode]);
 
@@ -186,10 +216,9 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
       if (Math.abs(dx) < DEAD_ZONE && Math.abs(dy) < DEAD_ZONE) return;
 
-      void channelRef.current?.send({
-        type: "broadcast",
-        event: "cursor-move",
-        payload: { playerId, dx, dy },
+      socketRef.current?.send({
+        type: "cursor-move",
+        payload: { dx, dy },
       });
     }
 
@@ -243,14 +272,14 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     };
   }, [sensorStatus, playerId]);
 
-  async function joinRoom() {
+  function joinRoom() {
     const cleanName = nickname.trim().replace(/\s+/g, " ").slice(0, 18);
-    const channel = channelRef.current;
+    const socket = socketRef.current;
 
     if (
       !cleanName ||
       !playerId ||
-      !channel ||
+      !socket ||
       status !== "connected" ||
       !hostOnline
     ) {
@@ -258,23 +287,23 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     }
 
     setNickname(cleanName);
+    nicknameRef.current = cleanName;
     localStorage.setItem("airmouse-nickname", cleanName);
 
-    await channel.track({
+    const presence: PlayerPresence = {
       kind: "player",
       playerId,
       name: cleanName,
       color: playerColor,
       motionEnabled: false,
       onlineAt: new Date().toISOString(),
-    });
+    };
+    if (!socket.send({ type: "join", payload: presence })) return;
 
+    joinedRef.current = true;
     setJoined(true);
-    await channel.send({
-      type: "broadcast",
-      event: "request-game-state",
-      payload: { playerId },
-    });
+    sessionStorage.setItem(`airmouse-joined-${roomCode}`, "true");
+    socket.send({ type: "request-game-state" });
   }
 
   async function enableMotion() {
@@ -312,43 +341,47 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
       }
 
       previousOrientationRef.current = null;
+      sensorStatusRef.current = "active";
       setSensorStatus("active");
 
-      await channelRef.current?.track({
-        kind: "player",
-        playerId,
-        name: nickname,
-        color: playerColor,
-        motionEnabled: true,
-        onlineAt: new Date().toISOString(),
+      socketRef.current?.send({
+        type: "player-update",
+        payload: {
+          kind: "player",
+          playerId,
+          name: nickname,
+          color: playerColor,
+          motionEnabled: true,
+          onlineAt: new Date().toISOString(),
+        },
       });
     } catch {
       setSensorStatus("denied");
     }
   }
 
-  async function pauseMotion() {
+  function pauseMotion() {
     releaseGrab();
+    sensorStatusRef.current = "idle";
     setSensorStatus("idle");
     previousOrientationRef.current = null;
 
-    await channelRef.current?.track({
-      kind: "player",
-      playerId,
-      name: nickname,
-      color: playerColor,
-      motionEnabled: false,
-      onlineAt: new Date().toISOString(),
+    socketRef.current?.send({
+      type: "player-update",
+      payload: {
+        kind: "player",
+        playerId,
+        name: nickname,
+        color: playerColor,
+        motionEnabled: false,
+        onlineAt: new Date().toISOString(),
+      },
     });
   }
 
   function recenter() {
     previousOrientationRef.current = null;
-    void channelRef.current?.send({
-      type: "broadcast",
-      event: "recenter",
-      payload: { playerId },
-    });
+    socketRef.current?.send({ type: "recenter" });
   }
 
   function startGrab() {
@@ -356,22 +389,14 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     holdingRef.current = true;
     setIsHolding(true);
     setFeedback(null);
-    void channelRef.current?.send({
-      type: "broadcast",
-      event: "pointer-down",
-      payload: { playerId },
-    });
+    socketRef.current?.send({ type: "pointer-down" });
   }
 
   function releaseGrab() {
     if (!holdingRef.current) return;
     holdingRef.current = false;
     setIsHolding(false);
-    void channelRef.current?.send({
-      type: "broadcast",
-      event: "pointer-up",
-      payload: { playerId },
-    });
+    socketRef.current?.send({ type: "pointer-up" });
   }
 
   if (!joined) {
@@ -676,7 +701,7 @@ function PhoneShell({
               </span>
             )}
             <span className="flex items-center gap-1.5 rounded-lg border border-black/8 bg-white/60 px-2.5 py-1.5 font-mono text-xs font-bold tracking-[.12em]">
-              {status === "connecting" ? (
+              {status === "connecting" || status === "reconnecting" ? (
                 <LoaderCircle className="size-3 animate-spin" />
               ) : status === "error" ? (
                 <CircleAlert className="size-3 text-red-500" />

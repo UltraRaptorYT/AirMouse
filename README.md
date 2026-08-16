@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AirMouse
 
-## Getting Started
+AirMouse is a multiplayer drag-and-drop quiz. Players use their phone's
+gyroscope and accelerometer to control cursors on a shared host screen.
 
-First, run the development server:
+## Architecture
+
+- Next.js hosts the landing page, room controller and shared host screen.
+- A Cloudflare Worker accepts the WebSocket upgrade.
+- One Durable Object coordinates each room code.
+- Player movement is sent only to the host; game state and results are sent
+  only to the clients that need them.
+
+## Local development
+
+Install dependencies:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Add the following line to `.env.local`:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```dotenv
+NEXT_PUBLIC_AIRMOUSE_WS_URL=ws://localhost:8787
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Start the realtime service and the Next.js app in separate terminals:
 
-## Learn More
+```bash
+pnpm realtime:dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+pnpm dev
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Then open [http://localhost:3000/screen](http://localhost:3000/screen).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+For motion testing on a physical phone, deploy the Worker and frontend first.
+Mobile sensor permissions generally require an HTTPS page.
 
-## Deploy on Vercel
+## Deployment
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Follow [CLOUDFLARE_SETUP.md](./CLOUDFLARE_SETUP.md) for the first deployment,
+Vercel environment variable and optional origin restriction.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Checks
+
+```bash
+pnpm typecheck
+pnpm lint
+pnpm realtime:check
+pnpm build
+```

@@ -42,3 +42,34 @@ export type DropResultPayload = {
   points: number;
   totalScore: number;
 };
+
+export type RoomPresencePayload = {
+  hostOnline: boolean;
+  players: PlayerPresence[];
+};
+
+export type ClientRoomMessage =
+  | { type: "join"; payload: PlayerPresence }
+  | { type: "player-update"; payload: PlayerPresence }
+  | { type: "request-game-state" }
+  | { type: "cursor-move"; payload: Omit<CursorMovePayload, "playerId"> }
+  | { type: "pointer-down" }
+  | { type: "pointer-up" }
+  | { type: "recenter" }
+  | { type: "game-state"; payload: GameStatePayload }
+  | { type: "drop-result"; payload: DropResultPayload }
+  | { type: "round-complete"; payload: { questionId: string } }
+  | { type: "ping" };
+
+export type ServerRoomMessage =
+  | ({ type: "connected" } & RoomPresencePayload)
+  | ({ type: "presence" } & RoomPresencePayload)
+  | { type: "game-state"; payload: GameStatePayload }
+  | { type: "cursor-move"; payload: CursorMovePayload }
+  | { type: "pointer-down"; payload: PointerActionPayload }
+  | { type: "pointer-up"; payload: PointerActionPayload }
+  | { type: "recenter"; payload: PointerActionPayload }
+  | { type: "drop-result"; payload: DropResultPayload }
+  | { type: "round-complete"; payload: { questionId: string } }
+  | { type: "pong" }
+  | { type: "error"; message: string };

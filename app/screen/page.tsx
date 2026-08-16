@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { RealtimeChannel } from "@supabase/supabase-js";
 import { QRCodeSVG } from "qrcode.react";
 import {
   ArrowRight,
@@ -25,17 +24,22 @@ import {
   toPublicQuestion,
   type PublicQuestion,
 } from "@/lib/game/questions";
-import { supabase } from "@/lib/supabase/client";
-import { generateRoomCode, getRoomChannel } from "@/lib/realtime/room";
+import {
+  createRoomSocket,
+  generateRoomCode,
+  type RoomConnectionStatus,
+  type RoomSocket,
+} from "@/lib/realtime/room";
 import type {
   CursorMovePayload,
   DropResultPayload,
   GameStatePayload,
   PlayerPresence,
   PointerActionPayload,
+  ServerRoomMessage,
 } from "@/lib/realtime/types";
 
-type ConnectionStatus = "connecting" | "ready" | "error";
+type ConnectionStatus = "connecting" | "ready" | "reconnecting" | "error";
 
 type ScoreEntry = {
   name: string;
@@ -50,18 +54,7 @@ type SolvedAnswer = {
 };
 
 const FALLBACK_COLOR = "#ff6b4a";
-
-function getPlayers(channel: RealtimeChannel) {
-  const presences = Object.values(channel.presenceState()).flat() as Array<
-    Record<string, unknown>
-  >;
-
-  return presences
-    .filter((presence) => presence.kind === "player")
-    .map((presence) => presence as unknown as PlayerPresence)
-    .filter((player) => player.playerId && player.name)
-    .sort((a, b) => a.name.localeCompare(b.name));
-}
+const PLAYER_DISCONNECT_GRACE_MS = 15_000;
 
 export default function ScreenPage() {
   const [roomCode, setRoomCode] = useState("");
@@ -81,7 +74,8 @@ export default function ScreenPage() {
     questionCount: questionBank.length,
   });
 
-  const channelRef = useRef<RealtimeChannel | null>(null);
+  const socketRef = useRef<RoomSocket | null>(null);
+  const playerRemovalTimersRef = useRef<Map<string, number>>(new Map());
   const gameStateRef = useRef(gameState);
   const scoresRef = useRef(scores);
   const playersRef = useRef(players);
@@ -115,48 +109,83 @@ export default function ScreenPage() {
     if (!roomCode) return;
 
     const hostKey = `host-${roomCode}-${crypto.randomUUID()}`;
-    const channel = getRoomChannel(roomCode, hostKey);
-    channelRef.current = channel;
+    const removalTimers = playerRemovalTimersRef.current;
 
-    channel
-      .on("presence", { event: "sync" }, () => {
-        const nextPlayers = getPlayers(channel);
-        const onlineIds = new Set(nextPlayers.map((player) => player.playerId));
+    function removePlayer(playerId: string) {
+      playerRemovalTimersRef.current.delete(playerId);
+      const nextPlayers = playersRef.current.filter(
+        (player) => player.playerId !== playerId,
+      );
+      playersRef.current = nextPlayers;
+      setPlayers(nextPlayers);
 
-        playersRef.current = nextPlayers;
-        setPlayers(nextPlayers);
-        const nextDragging = Object.fromEntries(
-          Object.entries(draggingRef.current).filter(([playerId]) =>
-            onlineIds.has(playerId),
-          ),
+      const nextDragging = { ...draggingRef.current };
+      delete nextDragging[playerId];
+      draggingRef.current = nextDragging;
+      setDragging(nextDragging);
+
+      setCursors((current) => {
+        const next = { ...current };
+        delete next[playerId];
+        cursorsRef.current = next;
+        return next;
+      });
+    }
+
+    function syncPlayers(nextPlayers: PlayerPresence[]) {
+      const onlineIds = new Set(nextPlayers.map((player) => player.playerId));
+      const mergedPlayers = new Map(
+        playersRef.current.map((player) => [player.playerId, player]),
+      );
+
+      nextPlayers.forEach((player) => {
+        const removalTimer = playerRemovalTimersRef.current.get(player.playerId);
+        if (removalTimer !== undefined) window.clearTimeout(removalTimer);
+        playerRemovalTimersRef.current.delete(player.playerId);
+        mergedPlayers.set(player.playerId, player);
+      });
+
+      playersRef.current.forEach((player) => {
+        if (
+          onlineIds.has(player.playerId) ||
+          playerRemovalTimersRef.current.has(player.playerId)
+        ) {
+          return;
+        }
+
+        const timer = window.setTimeout(
+          () => removePlayer(player.playerId),
+          PLAYER_DISCONNECT_GRACE_MS,
         );
-        draggingRef.current = nextDragging;
-        setDragging(nextDragging);
-        setCursors((current) => {
-          const next = Object.fromEntries(
-            Object.entries(current).filter(([playerId]) => onlineIds.has(playerId)),
-          );
+        playerRemovalTimersRef.current.set(player.playerId, timer);
+      });
 
-          nextPlayers.forEach((player, index) => {
-            next[player.playerId] ??= {
-              x: window.innerWidth / 2 + index * 28,
-              y: window.innerHeight / 2 + index * 20,
-            };
-          });
+      const merged = [...mergedPlayers.values()].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      );
+      playersRef.current = merged;
+      setPlayers(merged);
+      setCursors((current) => {
+        const next = { ...current };
+        nextPlayers.forEach((player, index) => {
+          next[player.playerId] ??= {
+            x: window.innerWidth / 2 + index * 28,
+            y: window.innerHeight / 2 + index * 20,
+          };
+        });
+        cursorsRef.current = next;
+        return next;
+      });
+    }
 
-          cursorsRef.current = next;
-          return next;
-        });
-      })
-      .on("broadcast", { event: "request-game-state" }, () => {
-        void channel.send({
-          type: "broadcast",
-          event: "game-state",
-          payload: gameStateRef.current,
-        });
-      })
-      .on("broadcast", { event: "cursor-move" }, ({ payload }) => {
-        const movement = payload as CursorMovePayload;
+    function handleMessage(message: ServerRoomMessage) {
+      if (message.type === "connected" || message.type === "presence") {
+        syncPlayers(message.players);
+        return;
+      }
+
+      if (message.type === "cursor-move") {
+        const movement: CursorMovePayload = message.payload;
         const dx = Math.max(-70, Math.min(70, Number(movement.dx) || 0));
         const dy = Math.max(-70, Math.min(70, Number(movement.dy) || 0));
 
@@ -178,9 +207,11 @@ export default function ScreenPage() {
           cursorsRef.current = next;
           return next;
         });
-      })
-      .on("broadcast", { event: "pointer-down" }, ({ payload }) => {
-        const action = payload as PointerActionPayload;
+        return;
+      }
+
+      if (message.type === "pointer-down") {
+        const action: PointerActionPayload = message.payload;
         const cursor = cursorsRef.current[action.playerId];
         const activeState = gameStateRef.current;
 
@@ -212,9 +243,11 @@ export default function ScreenPage() {
           ...current,
           [action.playerId]: "Holding a card",
         }));
-      })
-      .on("broadcast", { event: "pointer-up" }, ({ payload }) => {
-        const action = payload as PointerActionPayload;
+        return;
+      }
+
+      if (message.type === "pointer-up") {
+        const action: PointerActionPayload = message.payload;
         const answerId = draggingRef.current[action.playerId];
         const cursor = cursorsRef.current[action.playerId];
         const activeQuestion = questionBank.find(
@@ -260,9 +293,8 @@ export default function ScreenPage() {
           setScores(nextScores);
 
           if (Object.keys(nextSolved).length === activeQuestion.answers.length) {
-            void channel.send({
-              type: "broadcast",
-              event: "round-complete",
+            socketRef.current?.send({
+              type: "round-complete",
               payload: { questionId: activeQuestion.id },
             });
           }
@@ -282,14 +314,12 @@ export default function ScreenPage() {
           totalScore,
         };
 
-        void channel.send({
-          type: "broadcast",
-          event: "drop-result",
-          payload: result,
-        });
-      })
-      .on("broadcast", { event: "recenter" }, ({ payload }) => {
-        const action = payload as PointerActionPayload;
+        socketRef.current?.send({ type: "drop-result", payload: result });
+        return;
+      }
+
+      if (message.type === "recenter") {
+        const action: PointerActionPayload = message.payload;
 
         setCursors((current) => {
           const next = {
@@ -302,27 +332,31 @@ export default function ScreenPage() {
           cursorsRef.current = next;
           return next;
         });
-      })
-      .subscribe(async (subscriptionStatus) => {
-        if (subscriptionStatus === "SUBSCRIBED") {
-          await channel.track({
-            kind: "host",
-            onlineAt: new Date().toISOString(),
-          });
-          setStatus("ready");
-        }
+      }
+    }
 
-        if (
-          subscriptionStatus === "CHANNEL_ERROR" ||
-          subscriptionStatus === "TIMED_OUT"
-        ) {
-          setStatus("error");
-        }
-      });
+    const socket = createRoomSocket({
+      roomCode,
+      role: "host",
+      clientId: hostKey,
+      onStatus: (nextStatus: RoomConnectionStatus) => {
+        setStatus(nextStatus === "connected" ? "ready" : nextStatus);
+      },
+      onMessage: handleMessage,
+      onOpen: () => {
+        socketRef.current?.send({
+          type: "game-state",
+          payload: gameStateRef.current,
+        });
+      },
+    });
+    socketRef.current = socket;
 
     return () => {
-      void supabase.removeChannel(channel);
-      channelRef.current = null;
+      socket.close();
+      socketRef.current = null;
+      removalTimers.forEach((timer) => window.clearTimeout(timer));
+      removalTimers.clear();
     };
   }, [roomCode]);
 
@@ -351,11 +385,7 @@ export default function ScreenPage() {
     gameStateRef.current = nextState;
     setGameState(nextState);
 
-    void channelRef.current?.send({
-      type: "broadcast",
-      event: "game-state",
-      payload: nextState,
-    });
+    socketRef.current?.send({ type: "game-state", payload: nextState });
   }
 
   function startQuestion(index: number) {
@@ -676,7 +706,9 @@ function HostShell({
           </div>
 
           <div className="flex items-center gap-3">
-            {status === "connecting" && <LoaderCircle className="size-4 animate-spin text-white/40" />}
+            {(status === "connecting" || status === "reconnecting") && (
+              <LoaderCircle className="size-4 animate-spin text-white/40" />
+            )}
             {status === "error" && <WifiOff className="size-4 text-red-400" />}
             <span className="hidden text-xs text-white/35 sm:inline">Room</span>
             <strong className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-mono tracking-[.18em]">
