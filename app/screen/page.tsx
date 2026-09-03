@@ -677,7 +677,7 @@ export default function ScreenPage() {
                       >
                         {player.motionEnabled
                           ? "Motion ready"
-                          : "Connecting motion…"}
+                          : "Motion off"}
                       </span>
                       {index === 0 && (
                         <Sparkles className="size-4 text-[#ffd166]" />

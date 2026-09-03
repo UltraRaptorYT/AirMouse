@@ -130,8 +130,7 @@ export class Room extends DurableObject<Env> {
     await this.handleHostMessage(message);
   }
 
-  webSocketClose(socket: WebSocket, code: number, reason: string) {
-    socket.close(code, reason);
+  webSocketClose() {
     this.broadcastPresence();
   }
 

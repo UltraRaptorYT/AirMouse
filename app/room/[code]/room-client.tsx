@@ -285,7 +285,6 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     }
 
     const motionGranted = await requestMotionAccess();
-    if (!motionGranted) return;
 
     setNickname(cleanName);
     nicknameRef.current = cleanName;
@@ -296,7 +295,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
       playerId,
       name: cleanName,
       color: playerColor,
-      motionEnabled: true,
+      motionEnabled: motionGranted,
       onlineAt: new Date().toISOString(),
     };
     if (!socket.send({ type: "join", payload: presence })) return;
@@ -305,6 +304,23 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     setJoined(true);
     sessionStorage.setItem(`airmouse-joined-${roomCode}`, "true");
     socket.send({ type: "request-game-state" });
+  }
+
+  async function enableMotion() {
+    const motionGranted = await requestMotionAccess();
+    if (!motionGranted || !playerId || !joinedRef.current) return;
+
+    socketRef.current?.send({
+      type: "player-update",
+      payload: {
+        kind: "player",
+        playerId,
+        name: nicknameRef.current,
+        color: playerColorRef.current,
+        motionEnabled: true,
+        onlineAt: new Date().toISOString(),
+      },
+    });
   }
 
   async function requestMotionAccess() {
@@ -425,6 +441,14 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
               </div>
             )}
 
+            {(status === "reconnecting" || status === "error") && (
+              <div className="mt-3 flex items-start gap-2 rounded-xl bg-red-50 px-3 py-2.5 text-xs font-medium text-red-700">
+                <CircleAlert className="mt-0.5 size-4 shrink-0" />
+                Unable to reach the room service. Check your connection and try
+                again.
+              </div>
+            )}
+
             {(sensorStatus === "denied" || sensorStatus === "unsupported") && (
               <div className="mt-3 flex items-start gap-2 rounded-xl bg-red-50 px-3 py-2.5 text-xs font-medium text-red-700">
                 <CircleAlert className="mt-0.5 size-4 shrink-0" />
@@ -513,6 +537,35 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
             <LoaderCircle className="size-4 animate-spin text-[#ff6b4a]" />
             Waiting for the host
           </div>
+
+          {sensorStatus !== "active" && (
+            <div className="mt-5 w-full max-w-sm rounded-2xl border border-amber-200 bg-amber-50 p-4 text-left text-amber-900">
+              <div className="flex items-start gap-3">
+                <CircleAlert className="mt-0.5 size-5 shrink-0" />
+                <div>
+                  <p className="font-black">Motion is not active</p>
+                  <p className="mt-1 text-sm leading-relaxed text-amber-800">
+                    You joined the room, but motion access is needed to control
+                    your cursor.
+                  </p>
+                </div>
+              </div>
+              {sensorStatus !== "unsupported" && (
+                <Button
+                  className="mt-3 h-11 w-full rounded-xl bg-amber-900 font-bold text-white hover:bg-amber-800"
+                  disabled={sensorStatus === "requesting"}
+                  onClick={() => void enableMotion()}
+                >
+                  {sensorStatus === "requesting" && (
+                    <LoaderCircle className="mr-1 size-4 animate-spin" />
+                  )}
+                  {sensorStatus === "requesting"
+                    ? "Requesting motion…"
+                    : "Enable motion"}
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </PhoneShell>
     );

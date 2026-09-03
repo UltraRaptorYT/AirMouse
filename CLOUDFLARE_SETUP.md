@@ -54,8 +54,11 @@ Enable it for Production and Preview. Redeploy the Next.js application after
 adding it: `NEXT_PUBLIC_` values are placed into the browser bundle at build
 time.
 
-For local Next.js development against the deployed Worker, put the same `wss`
-URL in `.env.local` and restart `pnpm dev`.
+For local development, keep `NEXT_PUBLIC_AIRMOUSE_WS_URL=ws://localhost:8787`
+in `.env.local` and run `pnpm realtime:dev` alongside `pnpm dev`. If you point
+local Next.js at the deployed Worker instead, add `http://localhost:3000` to
+`ALLOWED_ORIGINS`; otherwise the Worker will reject the WebSocket upgrade with
+HTTP 403.
 
 ## 4. Restrict which websites can connect (recommended after testing)
 
