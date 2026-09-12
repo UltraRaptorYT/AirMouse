@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
+  ArrowUp,
   Check,
   CircleAlert,
   Crosshair,
@@ -43,8 +44,10 @@ type PermissionCapableEvent = {
 const PLAYER_COLORS = ["#ff6b4a", "#5c7cfa", "#15a97b", "#b259e8", "#d89b22"];
 const HORIZONTAL_AIM_RANGE_DEGREES = 32;
 const VERTICAL_AIM_RANGE_DEGREES = 24;
-const AIM_SMOOTHING = 0.35;
-const SEND_INTERVAL_MS = 50;
+// Light sensor smoothing only; the host interpolates per frame, so heavy smoothing here just adds lag.
+const AIM_SMOOTHING = 0.5;
+// ~60 packets/sec (matches the sensor rate). Each packet is ~50 bytes.
+const SEND_INTERVAL_MS = 16;
 const AIM_CHANGE_THRESHOLD = 0.002;
 
 function makePlayerId(roomCode: string) {
@@ -78,6 +81,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   const [playerId, setPlayerId] = useState("");
   const [playerColor, setPlayerColor] = useState(PLAYER_COLORS[0]);
   const [sensorStatus, setSensorStatus] = useState<SensorStatus>("idle");
+  const [calibrated, setCalibrated] = useState(false);
   const [isHolding, setIsHolding] = useState(false);
   const [totalScore, setTotalScore] = useState(0);
   const [feedback, setFeedback] = useState<{
@@ -93,6 +97,8 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
   const socketRef = useRef<RoomSocket | null>(null);
   const orientationOriginRef = useRef<OrientationReading | null>(null);
+  // Aim packets are held back until the player has pointed at the on-screen dot and tapped Calibrate.
+  const calibratedRef = useRef(false);
   const smoothedAimRef = useRef({ x: 0, y: 0 });
   const lastSentAimRef = useRef({ x: Number.NaN, y: Number.NaN });
   const lastSentAtRef = useRef(0);
@@ -165,8 +171,8 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
         setFeedback({
           correct: result.correct,
           message: result.correct
-            ? `Correct box! +${result.points} points`
-            : "Not that box — try again",
+            ? `Right spot! +${result.points} points`
+            : "Not the right spot — look at the screen and move it",
         });
         return;
       }
@@ -233,6 +239,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
       if (typeof event.alpha !== "number" || typeof event.beta !== "number") {
         return;
       }
+      if (!calibratedRef.current) return;
 
       const current = {
         alpha: event.alpha,
@@ -371,6 +378,14 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     lastSentAimRef.current = { x: Number.NaN, y: Number.NaN };
     lastSentAtRef.current = 0;
     socketRef.current?.send({ type: "recenter" });
+  }
+
+  // Called while the phone is pointed at the dot in the middle of the host screen:
+  // the next orientation reading becomes the origin, i.e. "screen centre".
+  function calibrate() {
+    calibratedRef.current = true;
+    setCalibrated(true);
+    recenter();
   }
 
   function syncAimBeforePointerAction() {
@@ -516,6 +531,42 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     );
   }
 
+  if (sensorStatus === "active" && !calibrated) {
+    return (
+      <PhoneShell roomCode={roomCode} status={status} score={totalScore}>
+        <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
+          <div className="relative flex size-36 items-center justify-center">
+            <span className="absolute inset-0 animate-ping rounded-full bg-[#ff6b4a]/15" />
+            <span className="absolute inset-4 rounded-full border-2 border-dashed border-[#ff6b4a]/40" />
+            <div className="relative flex size-24 items-center justify-center rounded-full bg-[#171922] text-white shadow-[0_24px_60px_rgba(23,25,34,.25)]">
+              <ArrowUp className="size-12 animate-bounce" strokeWidth={2.5} />
+            </div>
+          </div>
+          <span className="player-eyebrow mt-8">Calibrate</span>
+          <h1 className="mt-3 text-4xl font-black tracking-[-.04em]">
+            Point at the dot
+          </h1>
+          <p className="mt-4 max-w-xs leading-relaxed text-[#696c76]">
+            Hold your phone like a remote and aim the top of it at the{" "}
+            <span className="font-bold text-[#ff6b4a]">orange dot</span> in
+            the centre of the big screen. Keep it steady, then tap Calibrate.
+          </p>
+
+          <Button
+            className="mt-8 h-14 w-full max-w-xs rounded-2xl bg-[#ff6b4a] text-base font-bold text-white hover:bg-[#ff7a5d]"
+            onClick={calibrate}
+          >
+            <Crosshair className="mr-1 size-5" />
+            Calibrate
+          </Button>
+          <p className="mt-4 text-xs font-semibold text-[#9a9ca3]">
+            You can recenter at any time later.
+          </p>
+        </div>
+      </PhoneShell>
+    );
+  }
+
   if (gameState.phase === "lobby") {
     return (
       <PhoneShell roomCode={roomCode} status={status} score={totalScore}>
@@ -639,9 +690,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     <PhoneShell roomCode={roomCode} status={status} score={totalScore}>
       <div className="flex flex-1 flex-col pb-6 pt-5">
         <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[.15em] text-[#90929a]">
-          <span>
-            Question {gameState.questionIndex + 1}/{gameState.questionCount}
-          </span>
+          <span>{gameState.challengeLabel ?? "Passage"}</span>
           <span className="flex items-center gap-1.5">
             <span
               className={`size-2 rounded-full ${sensorStatus === "active" ? "bg-[#15a97b]" : "bg-amber-500"}`}
@@ -649,20 +698,13 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
             {sensorStatus === "active" ? "Motion live" : "Motion off"}
           </span>
         </div>
-        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/8">
-          <div
-            className="h-full rounded-full bg-[#ff6b4a] transition-[width] duration-300"
-            style={{
-              width: `${((gameState.questionIndex + 1) / gameState.questionCount) * 100}%`,
-            }}
-          />
-        </div>
 
         <h1 className="mt-6 text-balance text-2xl font-black leading-[1.04] tracking-[-.04em]">
-          {question.prompt}
+          Fill in the passage
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-[#6d707a]">
-          Point your phone at the shared screen to aim your colored cursor.
+          {question.instruction} Wrong placements stay on screen, so pick them
+          up again to move them.
         </p>
 
         <div className="my-6 flex flex-1 flex-col">
@@ -750,7 +792,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           <div className="mt-3 flex items-center gap-3 rounded-2xl bg-[#fff4cf] p-4 text-[#755509]">
             <Sparkles className="size-5" />
             <p className="font-black">
-              Phrase complete! The next question will appear automatically.
+              Passage complete! Look at the screen for the final time.
             </p>
           </div>
         )}

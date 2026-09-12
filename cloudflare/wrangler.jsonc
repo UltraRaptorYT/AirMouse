@@ -11,6 +11,10 @@
       {
         "name": "ROOMS",
         "class_name": "Room"
+      },
+      {
+        "name": "LEADERBOARD",
+        "class_name": "Leaderboard"
       }
     ]
   },
@@ -18,6 +22,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["Room"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["Leaderboard"]
     }
   ]
 }

@@ -61,6 +61,26 @@ export type RoomPresencePayload = {
   players: PlayerPresence[];
 };
 
+/** One completed run by one team, persisted globally across rooms. */
+export type LeaderboardEntry = {
+  /** Client-generated UUID so re-sends after a reconnect are ignored. */
+  id: string;
+  challengeId: string;
+  challengeLabel: string;
+  language: GameLanguage;
+  teamName: string;
+  playerCount: number;
+  /** Wall-clock time from first question to completion, including hint penalties. */
+  timeMs: number;
+  penaltyMs: number;
+  completedAt: number;
+};
+
+export type LeaderboardPayload = {
+  /** Sorted fastest-first; capped per challenge on the server. */
+  entries: LeaderboardEntry[];
+};
+
 export type ClientRoomMessage =
   | { type: "join"; payload: PlayerPresence }
   | { type: "player-update"; payload: PlayerPresence }
@@ -73,6 +93,8 @@ export type ClientRoomMessage =
   | { type: "game-state"; payload: GameStatePayload }
   | { type: "drop-result"; payload: DropResultPayload }
   | { type: "round-complete"; payload: { questionId: string } }
+  | { type: "submit-result"; payload: LeaderboardEntry }
+  | { type: "request-leaderboard" }
   | { type: "ping" };
 
 export type ServerRoomMessage =
@@ -86,5 +108,6 @@ export type ServerRoomMessage =
   | { type: "recenter"; payload: PointerActionPayload }
   | { type: "drop-result"; payload: DropResultPayload }
   | { type: "round-complete"; payload: { questionId: string } }
+  | { type: "leaderboard"; payload: LeaderboardPayload }
   | { type: "pong" }
   | { type: "error"; message: string };

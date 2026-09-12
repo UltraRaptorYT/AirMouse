@@ -23,8 +23,13 @@ export type Challenge = {
   label: string;
   source: string;
   memoriseText: string;
+  /** The passage broken into short fragments, each with its own blanks. */
+  segments: Question[];
+  /** What is actually played: one question whose prompt is the whole passage with every blank inline. */
   questions: Question[];
 };
+
+type ChallengeInput = Omit<Challenge, "questions">;
 
 function makeQuestion(
   id: string,
@@ -51,6 +56,57 @@ function makeQuestion(
   };
 }
 
+/** Deterministic shuffle so host and phones agree on card order without sending it over the wire. */
+function seededShuffle<T>(items: T[], seed: string) {
+  let hash = 2166136261;
+  for (const character of seed) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+  const list = [...items];
+  for (let index = list.length - 1; index > 0; index -= 1) {
+    hash = Math.imul(hash ^ (hash >>> 15), 2246822507);
+    hash = Math.imul(hash ^ (hash >>> 13), 3266489909);
+    const swap = (hash >>> 0) % (index + 1);
+    [list[index], list[swap]] = [list[swap], list[index]];
+  }
+  return list;
+}
+
+/**
+ * Stitch every segment into one passage-wide question. Blank markers are renumbered
+ * sequentially so `[n]` always refers to `targets[n - 1]`.
+ */
+function buildPassageQuestion(challenge: ChallengeInput): Question {
+  const id = `${challenge.id}-passage`;
+  const targets: AnswerTarget[] = [];
+  const answers: AnswerCard[] = [];
+  const separator = challenge.language === "zh" ? "" : " ";
+
+  const prompt = challenge.segments
+    .map((segment) => {
+      const offset = targets.length;
+      segment.targets.forEach((target, index) => {
+        targets.push({ ...target, label: `${offset + index + 1}`, hint: `Part ${offset + index + 1}` });
+      });
+      segment.answers.forEach((answer) => answers.push(answer));
+      return segment.prompt.replace(/\[(\d+)\]/g, (_, n: string) => `[${offset + Number(n)}]`);
+    })
+    .join(separator);
+
+  return {
+    id,
+    prompt,
+    instruction:
+      challenge.language === "zh"
+        ? "将所有词组拖到经文中正确的空格里。"
+        : "Drag every phrase into its place in the passage.",
+    answers: seededShuffle(answers, id),
+    targets,
+  };
+}
+
+function defineChallenge(challenge: ChallengeInput): Challenge {
+  return { ...challenge, questions: [buildPassageQuestion(challenge)] };
+}
+
 const en1Text =
   "The Ten Teaching Sūtra says: Develop the following ideas with respect to your teachers. I have wandered for a long time through cyclic existence, and they search for me; I have been asleep, having been obscured by delusion for a long time, and they wake me; they pull me out of the depths of the ocean of existence; I have entered a bad path, and they reveal the good path to me; they release me from being bound in the prison of existence; I have been worn out by illness for a long time, and they are my doctors; they are the rain clouds that put out my blazing fire of attachment and the like.";
 const en2Text =
@@ -61,10 +117,10 @@ const zh2Text =
   "《华严经》说：“善财童子，如是随念痛哭流涕。诸善知识，是于一切恶趣之中，救护我。令善通达法平等性，开示安稳不安稳道，以普贤行而为教授。指示能往一切智城，所有之道，护送往赴一切智处，正令趣入法界大海，开示三世所知法海，显示圣众妙曼陀罗。善知识者，长我一切白净善法。”";
 
 export const challenges: Challenge[] = [
-  {
+  defineChallenge({
     id: "en-1", language: "en", number: 1, label: "English Challenge 1",
     source: "The Ten Teaching Sūtra", memoriseText: en1Text,
-    questions: [
+    segments: [
       makeQuestion("en1-1", "The Ten Teaching Sūtra says: [1] [2] [3].", ["Develop the following ideas", "with respect to", "your teachers"], "Build the missing phrase in order."),
       makeQuestion("en1-2", "I have wandered for a long time [1], [2].", ["through cyclic existence", "and they search for me"], "Complete the quotation."),
       makeQuestion("en1-3", "I have been asleep, [1], [2].", ["having been obscured by delusion for a long time", "and they wake me"], "Complete the quotation."),
@@ -74,11 +130,11 @@ export const challenges: Challenge[] = [
       makeQuestion("en1-7", "I have been worn out by [1], [2].", ["illness for a long time", "and they are my doctors"], "Complete the quotation."),
       makeQuestion("en1-8", "they are the rain clouds that [1] [2].", ["put out my blazing fire", "of attachment and the like"], "Complete the quotation."),
     ],
-  },
-  {
+  }),
+  defineChallenge({
     id: "en-2", language: "en", number: 2, label: "English Challenge 2",
     source: "The Array of Stalks Sūtra", memoriseText: en2Text,
-    questions: [
+    segments: [
       makeQuestion("en2-1", "Youthful Sudhana, the teachers are [1] [2].", ["those who protect me", "from all miserable realms"], "Complete the quotation."),
       makeQuestion("en2-2", "they cause me to [1].", ["know the sameness of phenomena"], "Complete the quotation."),
       makeQuestion("en2-3", "they show me the paths that [1] [2].", ["lead to happiness", "and those that lead to unhappiness"], "Complete the quotation."),
@@ -90,11 +146,11 @@ export const challenges: Challenge[] = [
       makeQuestion("en2-9", "and they reveal to me [1] [2].", ["the circle of", "the noble beings' assembly"], "Complete the quotation."),
       makeQuestion("en2-10", "The teachers [1]. [2], [3].", ["increase all my virtues", "Remembering this", "you will weep"], "Complete the quotation."),
     ],
-  },
-  {
+  }),
+  defineChallenge({
     id: "zh-1", language: "zh", number: 1, label: "中文挑战一",
     source: "《十法经》", memoriseText: zh1Text,
-    questions: [
+    segments: [
       makeQuestion("zh1-1", "《十法经》云：“于长夜中，[1][2]，", ["驰骋生死", "寻觅我者"], "依次组成缺少的经文。"),
       makeQuestion("zh1-2", "于长夜中[1]，[2]，", ["为愚痴覆而重睡眠", "醒觉我者"], "补全经文。"),
       makeQuestion("zh1-3", "沉溺有海，[1]，", ["拔济我者"], "补全经文。"),
@@ -102,11 +158,11 @@ export const challenges: Challenge[] = [
       makeQuestion("zh1-5", "我于长夜，[1][2]，", ["病所逼恼", "为作医王"], "依次组成缺少的经文。"),
       makeQuestion("zh1-6", "我被贪等[1]，[2]，应如是想。”", ["猛火烧燃", "为作云雨而为息灭"], "补全经文。"),
     ],
-  },
-  {
+  }),
+  defineChallenge({
     id: "zh-2", language: "zh", number: 2, label: "中文挑战二",
     source: "《华严经》", memoriseText: zh2Text,
-    questions: [
+    segments: [
       makeQuestion("zh2-1", "《华严经》说：“善财童子，[1][2]。", ["如是随念", "痛哭流涕"], "依次组成缺少的经文。"),
       makeQuestion("zh2-2", "诸善知识，[1]，[2]。", ["是于一切恶趣之中", "救护我"], "补全经文。"),
       makeQuestion("zh2-3", "令善通达法平等性，[1]，[2]。", ["开示安稳不安稳道", "以普贤行而为教授"], "补全经文。"),
@@ -115,7 +171,7 @@ export const challenges: Challenge[] = [
       makeQuestion("zh2-6", "开示三世所知法海，[1]，", ["显示圣众妙曼陀罗"], "补全经文。"),
       makeQuestion("zh2-7", "善知识者，[1]。”", ["长我一切白净善法"], "补全经文。"),
     ],
-  },
+  }),
 ];
 
 export function getChallenge(language: GameLanguage, number: ChallengeNumber) {

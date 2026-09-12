@@ -3,6 +3,7 @@ import { DurableObject } from "cloudflare:workers";
 import type {
   ClientRoomMessage,
   GameStatePayload,
+  LeaderboardEntry,
   PlayerPresence,
   ServerRoomMessage,
 } from "../lib/realtime/types";
@@ -15,11 +16,16 @@ type SocketAttachment = {
 
 interface Env {
   ROOMS: DurableObjectNamespace<Room>;
+  LEADERBOARD: DurableObjectNamespace<Leaderboard>;
   ALLOWED_ORIGINS?: string;
 }
 
 const MAX_MESSAGE_BYTES = 4_096;
 const ROOM_CODE_PATTERN = /^[A-Z0-9]{4,12}$/;
+const LEADERBOARD_ID = "global";
+const LEADERBOARD_PER_CHALLENGE = 10;
+const LEADERBOARD_MIN_TIME_MS = 10_000;
+const LEADERBOARD_MAX_TIME_MS = 6 * 60 * 60 * 1_000;
 
 function jsonResponse(body: unknown, status = 200) {
   return Response.json(body, {
@@ -51,6 +57,70 @@ function isPlayerPresence(value: unknown): value is PlayerPresence {
     typeof player.color === "string" &&
     typeof player.onlineAt === "string"
   );
+}
+
+function sanitizeLeaderboardEntry(value: unknown): LeaderboardEntry | null {
+  if (!value || typeof value !== "object") return null;
+  const entry = value as Partial<LeaderboardEntry>;
+  const timeMs = Number(entry.timeMs);
+  const penaltyMs = Number(entry.penaltyMs) || 0;
+  if (
+    typeof entry.id !== "string" ||
+    typeof entry.challengeId !== "string" ||
+    typeof entry.challengeLabel !== "string" ||
+    typeof entry.teamName !== "string" ||
+    (entry.language !== "en" && entry.language !== "zh") ||
+    !Number.isFinite(timeMs) ||
+    timeMs < LEADERBOARD_MIN_TIME_MS ||
+    timeMs > LEADERBOARD_MAX_TIME_MS
+  ) {
+    return null;
+  }
+
+  return {
+    id: entry.id.slice(0, 64),
+    challengeId: entry.challengeId.slice(0, 32),
+    challengeLabel: entry.challengeLabel.slice(0, 48),
+    language: entry.language,
+    teamName: entry.teamName.trim().replace(/\s+/g, " ").slice(0, 120) || "Anonymous team",
+    playerCount: Math.max(1, Math.min(50, Math.round(Number(entry.playerCount) || 1))),
+    timeMs: Math.round(timeMs),
+    penaltyMs: Math.max(0, Math.round(penaltyMs)),
+    completedAt: Number.isFinite(Number(entry.completedAt)) ? Number(entry.completedAt) : Date.now(),
+  };
+}
+
+/**
+ * Single global Durable Object holding the all-time fastest completions.
+ * Rooms call into it via RPC; it never talks to clients directly.
+ */
+export class Leaderboard extends DurableObject<Env> {
+  async list(): Promise<LeaderboardEntry[]> {
+    return (await this.ctx.storage.get<LeaderboardEntry[]>("entries")) ?? [];
+  }
+
+  async submit(entry: LeaderboardEntry): Promise<LeaderboardEntry[]> {
+    const entries = await this.list();
+    if (entries.some((existing) => existing.id === entry.id)) return entries;
+
+    const byChallenge = new Map<string, LeaderboardEntry[]>();
+    for (const existing of [...entries, entry]) {
+      const bucket = byChallenge.get(existing.challengeId) ?? [];
+      bucket.push(existing);
+      byChallenge.set(existing.challengeId, bucket);
+    }
+
+    const next = [...byChallenge.values()]
+      .flatMap((bucket) =>
+        bucket
+          .sort((a, b) => a.timeMs - b.timeMs || a.completedAt - b.completedAt)
+          .slice(0, LEADERBOARD_PER_CHALLENGE),
+      )
+      .sort((a, b) => a.timeMs - b.timeMs || a.completedAt - b.completedAt);
+
+    await this.ctx.storage.put("entries", next);
+    return next;
+  }
 }
 
 export class Room extends DurableObject<Env> {
@@ -102,12 +172,9 @@ export class Room extends DurableObject<Env> {
   }
 
   async webSocketMessage(socket: WebSocket, rawMessage: string | ArrayBuffer) {
-    const byteLength =
-      typeof rawMessage === "string"
-        ? new TextEncoder().encode(rawMessage).byteLength
-        : rawMessage.byteLength;
-
-    if (byteLength > MAX_MESSAGE_BYTES || typeof rawMessage !== "string") {
+    // Cursor packets arrive ~60x/sec per player; keep this hot path allocation-free.
+    // A JS string's UTF-16 length is a lower bound on its UTF-8 byte length, so this is a safe cap.
+    if (typeof rawMessage !== "string" || rawMessage.length > MAX_MESSAGE_BYTES) {
       this.send(socket, { type: "error", message: "Invalid message" });
       return;
     }
@@ -226,7 +293,28 @@ export class Room extends DurableObject<Env> {
 
     if (message.type === "round-complete") {
       this.sendToPlayers({ type: "round-complete", payload: message.payload });
+      return;
     }
+
+    if (message.type === "request-leaderboard") {
+      const entries = await this.leaderboard().list();
+      this.sendToHosts({ type: "leaderboard", payload: { entries } });
+      return;
+    }
+
+    if (message.type === "submit-result") {
+      const entry = sanitizeLeaderboardEntry(message.payload);
+      if (!entry) {
+        this.sendToHosts({ type: "error", message: "Invalid leaderboard entry" });
+        return;
+      }
+      const entries = await this.leaderboard().submit(entry);
+      this.sendToHosts({ type: "leaderboard", payload: { entries } });
+    }
+  }
+
+  private leaderboard() {
+    return this.env.LEADERBOARD.get(this.env.LEADERBOARD.idFromName(LEADERBOARD_ID));
   }
 
   private getPresence() {
@@ -291,6 +379,11 @@ export default {
 
     if (url.pathname === "/health") {
       return jsonResponse({ ok: true, service: "airmouse-realtime" });
+    }
+
+    if (url.pathname === "/leaderboard" && request.method === "GET") {
+      const leaderboard = env.LEADERBOARD.get(env.LEADERBOARD.idFromName(LEADERBOARD_ID));
+      return jsonResponse({ entries: await leaderboard.list() });
     }
 
     const match = url.pathname.match(/^\/rooms\/([^/]+)$/);
