@@ -1,6 +1,6 @@
-import type { PublicQuestion } from "@/lib/game/questions";
+import type { ChallengeNumber, GameLanguage, PublicQuestion } from "@/lib/game/questions";
 
-export type RoomPhase = "lobby" | "question" | "finished";
+export type RoomPhase = "lobby" | "language" | "challenge" | "memorise" | "question" | "finished";
 
 export type PlayerPresence = {
   kind: "player";
@@ -21,7 +21,14 @@ export type GameStatePayload = {
   question?: PublicQuestion;
   questionIndex: number;
   questionCount: number;
+  language?: GameLanguage;
+  challenge?: ChallengeNumber;
+  challengeLabel?: string;
+  memoriseText?: string;
+  phaseEndsAt?: number;
   startedAt?: number;
+  penaltyMs?: number;
+  completedAt?: number;
 };
 
 export type CursorMovePayload = {

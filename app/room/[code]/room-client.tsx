@@ -6,8 +6,10 @@ import {
   Check,
   CircleAlert,
   Crosshair,
+  Clock3,
   Gamepad2,
   Hand,
+  Languages,
   LoaderCircle,
   Move3d,
   Sparkles,
@@ -571,6 +573,65 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     );
   }
 
+  if (
+    gameState.phase === "language" ||
+    gameState.phase === "challenge" ||
+    gameState.phase === "memorise"
+  ) {
+    const isMemorising = gameState.phase === "memorise";
+    const title = isMemorising
+      ? "Memorise together"
+      : gameState.phase === "language"
+        ? "Choose the language"
+        : "Choose the challenge";
+    const description = isMemorising
+      ? "Read or recite the passage on the shared screen. The questions begin automatically after 30 seconds."
+      : "Steer your colored cursor into a choice zone on the shared screen and keep it there for 5 seconds.";
+
+    return (
+      <PhoneShell roomCode={roomCode} status={status} score={totalScore}>
+        <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
+          <div
+            className={`flex size-20 items-center justify-center rounded-[1.7rem] text-white shadow-[0_18px_50px_rgba(0,0,0,.12)] ${isMemorising ? "bg-[#d89b22]" : "bg-[#5c7cfa]"}`}
+          >
+            {isMemorising ? (
+              <Clock3 className="size-9" />
+            ) : (
+              <Languages className="size-9" />
+            )}
+          </div>
+          <span className="player-eyebrow mt-7">
+            {gameState.challengeLabel ?? "Team selection"}
+          </span>
+          <h1 className="mt-3 text-4xl font-black tracking-[-.04em]">
+            {title}
+          </h1>
+          <p className="mt-4 max-w-sm leading-relaxed text-[#696c76]">
+            {description}
+          </p>
+
+          {!isMemorising && (
+            <Button
+              variant="outline"
+              className="mt-7 h-12 rounded-2xl border-black/10 bg-white px-6 font-bold"
+              onClick={recenter}
+            >
+              <Crosshair className="mr-1 size-5 text-[#15a97b]" />
+              Recenter cursor
+            </Button>
+          )}
+
+          <div className="mt-7 flex items-center gap-2 rounded-full border border-black/8 bg-white px-4 py-2.5 text-sm font-semibold shadow-sm">
+            <span
+              className={`size-2 rounded-full ${sensorStatus === "active" ? "bg-[#15a97b]" : "bg-amber-500"}`}
+            />
+            {sensorStatus === "active" ? "AirMouse is live" : "Motion is off"}
+          </div>
+        </div>
+      </PhoneShell>
+    );
+  }
+
   const question = gameState.question;
   if (!question) return null;
 
@@ -689,7 +750,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           <div className="mt-3 flex items-center gap-3 rounded-2xl bg-[#fff4cf] p-4 text-[#755509]">
             <Sparkles className="size-5" />
             <p className="font-black">
-              Round complete! Steer your cursor into the next-question zone.
+              Phrase complete! The next question will appear automatically.
             </p>
           </div>
         )}

@@ -2,80 +2,43 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import {
-  ArrowRight,
-  Check,
-  Crown,
-  Gamepad2,
-  LoaderCircle,
-  Play,
-  RotateCcw,
-  Smartphone,
-  Sparkles,
-  Trophy,
-  Users,
-  WifiOff,
-  MousePointer2,
-} from "lucide-react";
-
+import { Check, Clock3, Crown, Gamepad2, Hand, Languages, Lightbulb, LoaderCircle, MousePointer2, Play, RotateCcw, Smartphone, Trophy, Users, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  questionBank,
-  toPublicQuestion,
-  type PublicQuestion,
-} from "@/lib/game/questions";
-import {
-  createRoomSocket,
-  generateRoomCode,
-  type RoomConnectionStatus,
-  type RoomSocket,
-} from "@/lib/realtime/room";
-import type {
-  CursorAimPayload,
-  CursorMovePayload,
-  DropResultPayload,
-  GameStatePayload,
-  PlayerPresence,
-  PointerActionPayload,
-  ServerRoomMessage,
-} from "@/lib/realtime/types";
+import { getChallenge, getQuestion, toPublicQuestion, type ChallengeNumber, type GameLanguage, type PublicQuestion } from "@/lib/game/questions";
+import { createRoomSocket, generateRoomCode, type RoomConnectionStatus, type RoomSocket } from "@/lib/realtime/room";
+import type { CursorAimPayload, CursorMovePayload, DropResultPayload, GameStatePayload, PlayerPresence, PointerActionPayload, ServerRoomMessage } from "@/lib/realtime/types";
 
 type ConnectionStatus = "connecting" | "ready" | "reconnecting" | "error";
-
-type ScoreEntry = {
-  name: string;
-  score: number;
-};
-
+type ScoreEntry = { name: string; score: number };
 type CursorPosition = { x: number; y: number };
-
-type SolvedAnswer = {
-  targetId: string;
-  playerId: string;
-};
+type SolvedAnswer = { targetId: string; playerId: string };
+type DwellState = { value: string; playerId: string; progress: number } | null;
 
 const FALLBACK_COLOR = "#ff6b4a";
 const PLAYER_DISCONNECT_GRACE_MS = 15_000;
+const ROOM_TTL_MS = 20 * 60 * 1_000;
+const CHOICE_DWELL_MS = 5_000;
+const MEMORISE_MS = 30_000;
+
+function formatTime(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1_000));
+  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
+}
 
 export default function ScreenPage() {
   const [roomCode, setRoomCode] = useState("");
   const [roomUrl, setRoomUrl] = useState("");
+  const [roomExpiresAt, setRoomExpiresAt] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [players, setPlayers] = useState<PlayerPresence[]>([]);
   const [scores, setScores] = useState<Record<string, ScoreEntry>>({});
   const [cursors, setCursors] = useState<Record<string, CursorPosition>>({});
   const [dragging, setDragging] = useState<Record<string, string>>({});
-  const [solvedAnswers, setSolvedAnswers] = useState<
-    Record<string, SolvedAnswer>
-  >({});
+  const [solvedAnswers, setSolvedAnswers] = useState<Record<string, SolvedAnswer>>({});
   const [lastActions, setLastActions] = useState<Record<string, string>>({});
-  const [readyPlayerIds, setReadyPlayerIds] = useState<string[]>([]);
-  const [countdown, setCountdown] = useState<number | null>(null);
-  const [gameState, setGameState] = useState<GameStatePayload>({
-    phase: "lobby",
-    questionIndex: 0,
-    questionCount: questionBank.length,
-  });
+  const [dwell, setDwell] = useState<DwellState>(null);
+  const [gameState, setGameState] = useState<GameStatePayload>({ phase: "lobby", questionIndex: 0, questionCount: 0 });
 
   const socketRef = useRef<RoomSocket | null>(null);
   const playerRemovalTimersRef = useRef<Map<string, number>>(new Map());
@@ -85,1017 +48,332 @@ export default function ScreenPage() {
   const cursorsRef = useRef(cursors);
   const draggingRef = useRef(dragging);
   const solvedAnswersRef = useRef(solvedAnswers);
-  const readyPlayersRef = useRef<Set<string>>(new Set());
+  const selectionRef = useRef<{ value: string; playerId: string; startedAt: number } | null>(null);
+  const selectionLockedRef = useRef(false);
+
+  useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
+  useEffect(() => { scoresRef.current = scores; }, [scores]);
+  useEffect(() => { playersRef.current = players; }, [players]);
+
+  const clearRound = useCallback(() => {
+    solvedAnswersRef.current = {};
+    draggingRef.current = {};
+    setSolvedAnswers({});
+    setDragging({});
+    setLastActions({});
+  }, []);
+
+  const resetSession = useCallback(() => {
+    scoresRef.current = {};
+    setScores({});
+    clearRound();
+    selectionRef.current = null;
+    selectionLockedRef.current = false;
+    setDwell(null);
+    const lobby: GameStatePayload = { phase: "lobby", questionIndex: 0, questionCount: 0 };
+    gameStateRef.current = lobby;
+    setGameState(lobby);
+  }, [clearRound]);
+
+  const openFreshRoom = useCallback(() => {
+    const code = generateRoomCode();
+    resetSession();
+    setPlayers([]);
+    playersRef.current = [];
+    setCursors({});
+    cursorsRef.current = {};
+    setRoomCode(code);
+    setRoomUrl(`${window.location.origin}/room/${code}`);
+    setRoomExpiresAt(Date.now() + ROOM_TTL_MS);
+  }, [resetSession]);
 
   useEffect(() => {
-    gameStateRef.current = gameState;
-  }, [gameState]);
-
-  useEffect(() => {
-    scoresRef.current = scores;
-  }, [scores]);
-
-  useEffect(() => {
-    playersRef.current = players;
-  }, [players]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const code = generateRoomCode();
-      setRoomCode(code);
-      setRoomUrl(`${window.location.origin}/room/${code}`);
-    }, 0);
-
+    const timer = window.setTimeout(openFreshRoom, 0);
     return () => window.clearTimeout(timer);
+  }, [openFreshRoom]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
-    if (!roomCode) return;
+    if (!roomExpiresAt || now < roomExpiresAt || gameState.phase !== "lobby") return;
+    const timer = window.setTimeout(openFreshRoom, 0);
+    return () => window.clearTimeout(timer);
+  }, [gameState.phase, now, openFreshRoom, roomExpiresAt]);
 
+  const broadcastState = useCallback((nextState: GameStatePayload) => {
+    gameStateRef.current = nextState;
+    setGameState(nextState);
+    socketRef.current?.send({ type: "game-state", payload: nextState });
+  }, []);
+
+  const startQuestion = useCallback((index: number, state = gameStateRef.current) => {
+    if (!state.language || !state.challenge) return;
+    const challenge = getChallenge(state.language, state.challenge);
+    const question = challenge?.questions[index];
+    if (!challenge || !question) return;
+    clearRound();
+    broadcastState({
+      phase: "question", language: challenge.language, challenge: challenge.number,
+      challengeLabel: challenge.label, question: toPublicQuestion(question), questionIndex: index,
+      questionCount: challenge.questions.length, startedAt: state.startedAt ?? Date.now(), penaltyMs: state.penaltyMs ?? 0,
+    });
+  }, [broadcastState, clearRound]);
+
+  useEffect(() => {
+    if (gameState.phase !== "memorise" || !gameState.phaseEndsAt) return;
+    const timer = window.setTimeout(() => startQuestion(0, { ...gameStateRef.current, startedAt: Date.now() }), Math.max(0, gameState.phaseEndsAt - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [gameState.phase, gameState.phaseEndsAt, startQuestion]);
+
+  useEffect(() => {
+    if (!roomCode) return;
     const hostKey = `host-${roomCode}-${crypto.randomUUID()}`;
     const removalTimers = playerRemovalTimersRef.current;
 
     function removePlayer(playerId: string) {
       playerRemovalTimersRef.current.delete(playerId);
-      const nextPlayers = playersRef.current.filter(
-        (player) => player.playerId !== playerId,
-      );
+      const nextPlayers = playersRef.current.filter((player) => player.playerId !== playerId);
       playersRef.current = nextPlayers;
       setPlayers(nextPlayers);
-
       const nextDragging = { ...draggingRef.current };
       delete nextDragging[playerId];
       draggingRef.current = nextDragging;
       setDragging(nextDragging);
-
-      setCursors((current) => {
-        const next = { ...current };
-        delete next[playerId];
-        cursorsRef.current = next;
-        return next;
-      });
-
-      if (readyPlayersRef.current.delete(playerId)) {
-        setReadyPlayerIds([...readyPlayersRef.current]);
-      }
+      const nextCursors = { ...cursorsRef.current };
+      delete nextCursors[playerId];
+      cursorsRef.current = nextCursors;
+      setCursors(nextCursors);
     }
 
     function syncPlayers(nextPlayers: PlayerPresence[]) {
       const onlineIds = new Set(nextPlayers.map((player) => player.playerId));
-      const mergedPlayers = new Map(
-        playersRef.current.map((player) => [player.playerId, player]),
-      );
-
+      const merged = new Map(playersRef.current.map((player) => [player.playerId, player]));
       nextPlayers.forEach((player) => {
-        const removalTimer = playerRemovalTimersRef.current.get(
-          player.playerId,
-        );
-        if (removalTimer !== undefined) window.clearTimeout(removalTimer);
+        const timer = playerRemovalTimersRef.current.get(player.playerId);
+        if (timer !== undefined) window.clearTimeout(timer);
         playerRemovalTimersRef.current.delete(player.playerId);
-        mergedPlayers.set(player.playerId, player);
+        merged.set(player.playerId, player);
       });
-
       playersRef.current.forEach((player) => {
-        if (
-          onlineIds.has(player.playerId) ||
-          playerRemovalTimersRef.current.has(player.playerId)
-        ) {
-          return;
-        }
-
-        const timer = window.setTimeout(
-          () => removePlayer(player.playerId),
-          PLAYER_DISCONNECT_GRACE_MS,
-        );
-        playerRemovalTimersRef.current.set(player.playerId, timer);
+        if (onlineIds.has(player.playerId) || playerRemovalTimersRef.current.has(player.playerId)) return;
+        playerRemovalTimersRef.current.set(player.playerId, window.setTimeout(() => removePlayer(player.playerId), PLAYER_DISCONNECT_GRACE_MS));
       });
-
-      const merged = [...mergedPlayers.values()].sort((a, b) =>
-        a.name.localeCompare(b.name),
-      );
-      playersRef.current = merged;
-      setPlayers(merged);
-      setCursors((current) => {
-        const next = { ...current };
-        nextPlayers.forEach((player, index) => {
-          next[player.playerId] ??= {
-            x: window.innerWidth / 2 + index * 28,
-            y: window.innerHeight / 2 + index * 20,
-          };
-        });
-        cursorsRef.current = next;
-        return next;
+      const list = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
+      playersRef.current = list;
+      setPlayers(list);
+      const nextCursors = { ...cursorsRef.current };
+      nextPlayers.forEach((player, index) => {
+        nextCursors[player.playerId] ??= { x: window.innerWidth / 2 + index * 24, y: window.innerHeight / 2 + index * 18 };
       });
+      cursorsRef.current = nextCursors;
+      setCursors(nextCursors);
     }
 
-    function updatePlayerReady(playerId: string, cursor: CursorPosition) {
-      const activeQuestion = gameStateRef.current.question;
-      const roundIsComplete = Boolean(
-        activeQuestion &&
-        Object.keys(solvedAnswersRef.current).length ===
-          activeQuestion.answers.length,
-      );
-      const readyZone = roundIsComplete
-        ? document.querySelector<HTMLElement>("[data-next-zone]")
-        : null;
-      const bounds = readyZone?.getBoundingClientRect();
-      const isReady = Boolean(
-        bounds &&
-        cursor.x >= bounds.left &&
-        cursor.x <= bounds.right &&
-        cursor.y >= bounds.top &&
-        cursor.y <= bounds.bottom,
-      );
-      const wasReady = readyPlayersRef.current.has(playerId);
-      if (isReady === wasReady) return;
+    function updateCursor(playerId: string, nextPosition: CursorPosition) {
+      const next = { ...cursorsRef.current, [playerId]: nextPosition };
+      cursorsRef.current = next;
+      setCursors(next);
+    }
 
-      const nextReadyPlayers = new Set(readyPlayersRef.current);
-      if (isReady) nextReadyPlayers.add(playerId);
-      else nextReadyPlayers.delete(playerId);
-      readyPlayersRef.current = nextReadyPlayers;
-      setReadyPlayerIds([...nextReadyPlayers]);
-      setLastActions((current) => ({
-        ...current,
-        [playerId]: isReady
-          ? "Ready for next question"
-          : "Move to the launch zone",
-      }));
+    function applyHint(playerId: string) {
+      const state = gameStateRef.current;
+      const activeQuestion = getQuestion(state.question?.id);
+      if (!activeQuestion) return;
+      const answer = activeQuestion.answers.find((item) => !solvedAnswersRef.current[item.id]);
+      if (!answer) return;
+      const nextSolved = { ...solvedAnswersRef.current, [answer.id]: { targetId: answer.targetId, playerId: "hint" } };
+      solvedAnswersRef.current = nextSolved;
+      setSolvedAnswers(nextSolved);
+      broadcastState({ ...state, penaltyMs: (state.penaltyMs ?? 0) + 5_000 });
+      setLastActions((current) => ({ ...current, [playerId]: "Hint used: +5 seconds" }));
+      if (Object.keys(nextSolved).length === activeQuestion.answers.length) socketRef.current?.send({ type: "round-complete", payload: { questionId: activeQuestion.id } });
     }
 
     function handleMessage(message: ServerRoomMessage) {
-      if (message.type === "connected" || message.type === "presence") {
-        syncPlayers(message.players);
-        return;
-      }
-
+      if (message.type === "connected" || message.type === "presence") { syncPlayers(message.players); return; }
       if (message.type === "cursor-move") {
         const movement: CursorMovePayload = message.payload;
-        const dx = Math.max(-70, Math.min(70, Number(movement.dx) || 0));
-        const dy = Math.max(-70, Math.min(70, Number(movement.dy) || 0));
-
-        if (!movement.playerId || (!dx && !dy)) return;
-
-        const previous = cursorsRef.current[movement.playerId] ?? {
-          x: window.innerWidth / 2,
-          y: window.innerHeight / 2,
-        };
-        const nextPosition = {
-          x: Math.max(10, Math.min(window.innerWidth - 10, previous.x + dx)),
-          y: Math.max(10, Math.min(window.innerHeight - 10, previous.y + dy)),
-        };
-        const next = {
-          ...cursorsRef.current,
-          [movement.playerId]: nextPosition,
-        };
-        cursorsRef.current = next;
-        setCursors(next);
-        updatePlayerReady(movement.playerId, nextPosition);
+        const previous = cursorsRef.current[movement.playerId] ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+        updateCursor(movement.playerId, {
+          x: Math.max(10, Math.min(window.innerWidth - 10, previous.x + Math.max(-70, Math.min(70, Number(movement.dx) || 0)))),
+          y: Math.max(10, Math.min(window.innerHeight - 10, previous.y + Math.max(-70, Math.min(70, Number(movement.dy) || 0)))),
+        });
         return;
       }
-
       if (message.type === "cursor-aim") {
         const aim: CursorAimPayload = message.payload;
-        const x = Math.max(-1, Math.min(1, Number(aim.x) || 0));
-        const y = Math.max(-1, Math.min(1, Number(aim.y) || 0));
-        if (!aim.playerId) return;
-
-        const edgePadding = 16;
-        const nextPosition = {
-          x:
-            edgePadding +
-            ((x + 1) / 2) * Math.max(0, window.innerWidth - edgePadding * 2),
-          y:
-            edgePadding +
-            ((y + 1) / 2) * Math.max(0, window.innerHeight - edgePadding * 2),
-        };
-        const next = {
-          ...cursorsRef.current,
-          [aim.playerId]: nextPosition,
-        };
-        cursorsRef.current = next;
-        setCursors(next);
-        updatePlayerReady(aim.playerId, nextPosition);
+        const edge = 16;
+        updateCursor(aim.playerId, {
+          x: edge + ((Math.max(-1, Math.min(1, Number(aim.x) || 0)) + 1) / 2) * Math.max(0, window.innerWidth - edge * 2),
+          y: edge + ((Math.max(-1, Math.min(1, Number(aim.y) || 0)) + 1) / 2) * Math.max(0, window.innerHeight - edge * 2),
+        });
         return;
       }
-
       if (message.type === "pointer-down") {
         const action: PointerActionPayload = message.payload;
         const cursor = cursorsRef.current[action.playerId];
-        const activeState = gameStateRef.current;
-
-        if (!cursor || activeState.phase !== "question") return;
-
-        const card = document
-          .elementFromPoint(cursor.x, cursor.y)
-          ?.closest<HTMLElement>("[data-answer-card]");
-        const answerId = card?.dataset.answerCard;
-        const alreadyHeld = Object.values(draggingRef.current).includes(
-          answerId ?? "",
-        );
-
-        if (!answerId || alreadyHeld || solvedAnswersRef.current[answerId]) {
-          setLastActions((current) => ({
-            ...current,
-            [action.playerId]: "Move over an answer card",
-          }));
+        if (!cursor || gameStateRef.current.phase !== "question") return;
+        const element = document.elementFromPoint(cursor.x, cursor.y);
+        if (element?.closest("[data-hint-zone]")) { applyHint(action.playerId); return; }
+        const answerId = element?.closest<HTMLElement>("[data-answer-card]")?.dataset.answerCard;
+        if (!answerId || Object.values(draggingRef.current).includes(answerId) || solvedAnswersRef.current[answerId]) {
+          setLastActions((current) => ({ ...current, [action.playerId]: "Aim at a phrase card" }));
           return;
         }
-
-        const nextDragging = {
-          ...draggingRef.current,
-          [action.playerId]: answerId,
-        };
-        draggingRef.current = nextDragging;
-        setDragging(nextDragging);
-        setLastActions((current) => ({
-          ...current,
-          [action.playerId]: "Holding a card",
-        }));
+        const next = { ...draggingRef.current, [action.playerId]: answerId };
+        draggingRef.current = next;
+        setDragging(next);
+        setLastActions((current) => ({ ...current, [action.playerId]: "Holding a phrase" }));
         return;
       }
-
       if (message.type === "pointer-up") {
         const action: PointerActionPayload = message.payload;
         const answerId = draggingRef.current[action.playerId];
         const cursor = cursorsRef.current[action.playerId];
-        const activeQuestion = questionBank.find(
-          (question) => question.id === gameStateRef.current.question?.id,
-        );
-
+        const activeQuestion = getQuestion(gameStateRef.current.question?.id);
         if (!answerId || !cursor || !activeQuestion) return;
-
-        const targetElement = document
-          .elementFromPoint(cursor.x, cursor.y)
-          ?.closest<HTMLElement>("[data-answer-target]");
-        const targetId = targetElement?.dataset.answerTarget;
-        const answer = activeQuestion.answers.find(
-          (item) => item.id === answerId,
-        );
+        const targetId = document.elementFromPoint(cursor.x, cursor.y)?.closest<HTMLElement>("[data-answer-target]")?.dataset.answerTarget;
+        const answer = activeQuestion.answers.find((item) => item.id === answerId);
         const correct = Boolean(targetId && answer?.targetId === targetId);
-        const player = playersRef.current.find(
-          (item) => item.playerId === action.playerId,
-        );
+        const player = playersRef.current.find((item) => item.playerId === action.playerId);
         const previousScore = scoresRef.current[action.playerId]?.score ?? 0;
-        const points = correct ? 250 : 0;
+        const points = correct ? 100 : 0;
         const totalScore = previousScore + points;
-
         const nextDragging = { ...draggingRef.current };
         delete nextDragging[action.playerId];
         draggingRef.current = nextDragging;
         setDragging(nextDragging);
-
         if (correct && targetId) {
-          const nextSolved = {
-            ...solvedAnswersRef.current,
-            [answerId]: { targetId, playerId: action.playerId },
-          };
-          const nextScores = {
-            ...scoresRef.current,
-            [action.playerId]: {
-              name: player?.name ?? "Player",
-              score: totalScore,
-            },
-          };
-
+          const nextSolved = { ...solvedAnswersRef.current, [answerId]: { targetId, playerId: action.playerId } };
+          const nextScores = { ...scoresRef.current, [action.playerId]: { name: player?.name ?? "Player", score: totalScore } };
           solvedAnswersRef.current = nextSolved;
           scoresRef.current = nextScores;
           setSolvedAnswers(nextSolved);
           setScores(nextScores);
-
-          if (
-            Object.keys(nextSolved).length === activeQuestion.answers.length
-          ) {
-            socketRef.current?.send({
-              type: "round-complete",
-              payload: { questionId: activeQuestion.id },
-            });
-          }
+          if (Object.keys(nextSolved).length === activeQuestion.answers.length) socketRef.current?.send({ type: "round-complete", payload: { questionId: activeQuestion.id } });
         }
-
-        setLastActions((current) => ({
-          ...current,
-          [action.playerId]: correct
-            ? `Correct! +${points}`
-            : "Try another box",
-        }));
-
-        const result: DropResultPayload = {
-          playerId: action.playerId,
-          questionId: activeQuestion.id,
-          answerId,
-          correct,
-          points,
-          totalScore,
-        };
-
+        setLastActions((current) => ({ ...current, [action.playerId]: correct ? "Correct! +100" : "Wrong position - try again" }));
+        const result: DropResultPayload = { playerId: action.playerId, questionId: activeQuestion.id, answerId, correct, points, totalScore };
         socketRef.current?.send({ type: "drop-result", payload: result });
         return;
       }
-
-      if (message.type === "recenter") {
-        const action: PointerActionPayload = message.payload;
-
-        setCursors((current) => {
-          const next = {
-            ...current,
-            [action.playerId]: {
-              x: window.innerWidth / 2,
-              y: window.innerHeight / 2,
-            },
-          };
-          cursorsRef.current = next;
-          return next;
-        });
-        if (readyPlayersRef.current.delete(action.playerId)) {
-          setReadyPlayerIds([...readyPlayersRef.current]);
-        }
-      }
+      if (message.type === "recenter") updateCursor(message.payload.playerId, { x: window.innerWidth / 2, y: window.innerHeight / 2 });
     }
 
     const socket = createRoomSocket({
-      roomCode,
-      role: "host",
-      clientId: hostKey,
-      onStatus: (nextStatus: RoomConnectionStatus) => {
-        setStatus(nextStatus === "connected" ? "ready" : nextStatus);
-      },
+      roomCode, role: "host", clientId: hostKey,
+      onStatus: (nextStatus: RoomConnectionStatus) => setStatus(nextStatus === "connected" ? "ready" : nextStatus),
       onMessage: handleMessage,
-      onOpen: () => {
-        socketRef.current?.send({
-          type: "game-state",
-          payload: gameStateRef.current,
-        });
-      },
+      onOpen: () => socketRef.current?.send({ type: "game-state", payload: gameStateRef.current }),
     });
     socketRef.current = socket;
-
     return () => {
       socket.close();
       socketRef.current = null;
       removalTimers.forEach((timer) => window.clearTimeout(timer));
       removalTimers.clear();
     };
-  }, [roomCode]);
+  }, [broadcastState, roomCode]);
 
   useEffect(() => {
-    function keepCursorsOnScreen() {
-      setCursors((current) => {
-        const next = Object.fromEntries(
-          Object.entries(current).map(([playerId, cursor]) => [
-            playerId,
-            {
-              x: Math.max(10, Math.min(window.innerWidth - 10, cursor.x)),
-              y: Math.max(10, Math.min(window.innerHeight - 10, cursor.y)),
-            },
-          ]),
-        );
-        cursorsRef.current = next;
-        return next;
-      });
+    selectionRef.current = null;
+    selectionLockedRef.current = false;
+    const clearDwellTimer = window.setTimeout(() => setDwell(null), 0);
+    if (gameState.phase !== "language" && gameState.phase !== "challenge") {
+      return () => window.clearTimeout(clearDwellTimer);
     }
-
-    window.addEventListener("resize", keepCursorsOnScreen);
-    return () => window.removeEventListener("resize", keepCursorsOnScreen);
-  }, []);
-
-  const broadcastState = useCallback((nextState: GameStatePayload) => {
-    gameStateRef.current = nextState;
-    setGameState(nextState);
-
-    socketRef.current?.send({ type: "game-state", payload: nextState });
-  }, []);
-
-  const startQuestion = useCallback(
-    (index: number) => {
-      const question = questionBank[index];
-      if (!question) return;
-
-      solvedAnswersRef.current = {};
-      draggingRef.current = {};
-      readyPlayersRef.current = new Set();
-      setSolvedAnswers({});
-      setDragging({});
-      setReadyPlayerIds([]);
-      setCountdown(null);
-      setLastActions({});
-
-      broadcastState({
-        phase: "question",
-        question: toPublicQuestion(question),
-        questionIndex: index,
-        questionCount: questionBank.length,
-        startedAt: Date.now(),
+    const timer = window.setInterval(() => {
+      const zones = [...document.querySelectorAll<HTMLElement>("[data-choice]")];
+      const occupants = playersRef.current.flatMap((player) => {
+        const cursor = cursorsRef.current[player.playerId];
+        if (!cursor) return [];
+        const zone = zones.find((item) => {
+          const box = item.getBoundingClientRect();
+          return cursor.x >= box.left && cursor.x <= box.right && cursor.y >= box.top && cursor.y <= box.bottom;
+        });
+        return zone?.dataset.choice ? [{ playerId: player.playerId, value: zone.dataset.choice }] : [];
       });
-    },
-    [broadcastState],
-  );
-
-  const goNext = useCallback(() => {
-    const nextIndex = gameStateRef.current.questionIndex + 1;
-
-    if (nextIndex >= questionBank.length) {
-      readyPlayersRef.current = new Set();
-      setReadyPlayerIds([]);
-      setCountdown(null);
-      broadcastState({
-        phase: "finished",
-        questionIndex: questionBank.length - 1,
-        questionCount: questionBank.length,
-      });
-      return;
-    }
-
-    startQuestion(nextIndex);
-  }, [broadcastState, startQuestion]);
-
-  function playAgain() {
-    scoresRef.current = {};
-    setScores({});
-    solvedAnswersRef.current = {};
-    draggingRef.current = {};
-    readyPlayersRef.current = new Set();
-    setSolvedAnswers({});
-    setDragging({});
-    setReadyPlayerIds([]);
-    setCountdown(null);
-    setLastActions({});
-    broadcastState({
-      phase: "lobby",
-      questionIndex: 0,
-      questionCount: questionBank.length,
-    });
-  }
-
-  const rankedPlayers = useMemo(() => {
-    return players
-      .map((player) => ({
-        playerId: player.playerId,
-        name: scores[player.playerId]?.name ?? player.name,
-        score: scores[player.playerId]?.score ?? 0,
-        color: player.color,
-      }))
-      .sort((a, b) => b.score - a.score);
-  }, [players, scores]);
-
-  const solvedCount = Object.keys(solvedAnswers).length;
-  const activeAnswerCount = gameState.question?.answers.length ?? 0;
-  const roundComplete =
-    activeAnswerCount > 0 && solvedCount === activeAnswerCount;
-  const allPlayersReady =
-    roundComplete &&
-    players.length > 0 &&
-    players.every((player) => readyPlayerIds.includes(player.playerId));
-
-  useEffect(() => {
-    let startTimer: number | null = null;
-    let tickTimer: number | null = null;
-
-    if (!allPlayersReady) {
-      startTimer = window.setTimeout(() => setCountdown(null), 0);
-      return () => {
-        if (startTimer !== null) window.clearTimeout(startTimer);
-      };
-    }
-
-    let remaining = 3;
-    startTimer = window.setTimeout(() => setCountdown(remaining), 0);
-    tickTimer = window.setInterval(() => {
-      remaining -= 1;
-      if (remaining <= 0) {
-        if (tickTimer !== null) window.clearInterval(tickTimer);
-        tickTimer = null;
-        setCountdown(null);
-        goNext();
-        return;
+      const current = selectionRef.current;
+      const occupant = current ? occupants.find((item) => item.playerId === current.playerId && item.value === current.value) : occupants[0];
+      if (!occupant) { selectionRef.current = null; setDwell(null); return; }
+      const startedAt = current?.playerId === occupant.playerId && current.value === occupant.value ? current.startedAt : Date.now();
+      selectionRef.current = { ...occupant, startedAt };
+      const progress = Math.min(1, (Date.now() - startedAt) / CHOICE_DWELL_MS);
+      setDwell({ ...occupant, progress });
+      if (progress < 1 || selectionLockedRef.current) return;
+      selectionLockedRef.current = true;
+      if (gameStateRef.current.phase === "language") {
+        broadcastState({ phase: "challenge", language: occupant.value as GameLanguage, questionIndex: 0, questionCount: 0 });
+      } else {
+        const challenge = getChallenge(gameStateRef.current.language!, Number(occupant.value) as ChallengeNumber);
+        if (!challenge) return;
+        broadcastState({ phase: "memorise", language: challenge.language, challenge: challenge.number, challengeLabel: challenge.label, memoriseText: challenge.memoriseText, questionIndex: 0, questionCount: challenge.questions.length, phaseEndsAt: Date.now() + MEMORISE_MS, penaltyMs: 0 });
       }
-      setCountdown(remaining);
-    }, 1_000);
-
+    }, 100);
     return () => {
-      if (startTimer !== null) window.clearTimeout(startTimer);
-      if (tickTimer !== null) window.clearInterval(tickTimer);
+      window.clearTimeout(clearDwellTimer);
+      window.clearInterval(timer);
     };
-  }, [allPlayersReady, goNext]);
+  }, [broadcastState, gameState.phase]);
+
+  const activeAnswerCount = gameState.question?.answers.length ?? 0;
+  const solvedCount = Object.keys(solvedAnswers).length;
+  const roundComplete = activeAnswerCount > 0 && solvedCount === activeAnswerCount;
+  useEffect(() => {
+    if (!roundComplete || gameState.phase !== "question") return;
+    const timer = window.setTimeout(() => {
+      const nextIndex = gameStateRef.current.questionIndex + 1;
+      if (nextIndex < gameStateRef.current.questionCount) startQuestion(nextIndex);
+      else broadcastState({ ...gameStateRef.current, phase: "finished", question: undefined, completedAt: Date.now() });
+    }, 1_600);
+    return () => window.clearTimeout(timer);
+  }, [broadcastState, gameState.phase, roundComplete, startQuestion]);
+
+  const rankedPlayers = useMemo(() => players.map((player) => ({ playerId: player.playerId, name: scores[player.playerId]?.name ?? player.name, score: scores[player.playerId]?.score ?? 0, color: player.color })).sort((a, b) => b.score - a.score).slice(0, 5), [players, scores]);
+  const roomRemaining = Math.max(0, roomExpiresAt - now);
+  const elapsed = gameState.startedAt ? Math.max(0, (gameState.completedAt ?? now) - gameState.startedAt + (gameState.penaltyMs ?? 0)) : 0;
 
   if (gameState.phase === "lobby") {
-    return (
-      <HostShell roomCode={roomCode} status={status}>
-        <div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,.75fr)]">
-          <section className="host-panel relative overflow-hidden p-6 sm:p-8">
-            <div className="absolute -right-16 -top-20 size-64 rounded-full bg-[#ff6b4a]/15 blur-2xl" />
-            <div className="relative flex h-full flex-col">
-              <div className="mb-7 flex items-center gap-3">
-                <span className="eyebrow">Join the game</span>
-                <span className="h-px flex-1 bg-white/10" />
-              </div>
+    return <HostShell roomCode={roomCode} status={status} roomRemaining={roomRemaining}><div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[minmax(0,1.4fr)_360px]"><section className="host-panel grid items-center gap-8 overflow-hidden p-7 md:grid-cols-[280px_1fr] md:p-9"><div className="mx-auto w-full max-w-[280px] rounded-[2rem] bg-[#fffdf6] p-5 shadow-2xl">{roomUrl ? <QRCodeSVG value={roomUrl} size={260} level="M" className="h-auto w-full" bgColor="#fffdf6" fgColor="#121521" /> : <div className="aspect-square animate-pulse rounded-2xl bg-black/5" />}</div><div><span className="eyebrow">Join the open room</span><h1 className="mt-5 text-balance text-4xl font-black leading-[.95] tracking-[-.04em] sm:text-6xl">Scan. Aim. Complete the teaching.</h1><p className="mt-5 max-w-xl text-lg leading-relaxed text-white/55">Players can join together at any time. This room code refreshes automatically after 20 minutes while waiting.</p><div className="mt-7 inline-flex items-center gap-4 rounded-2xl border border-white/10 bg-black/20 px-5 py-4"><span className="text-sm text-white/45">Room code</span><strong className="font-mono text-2xl tracking-[.22em]">{roomCode || "------"}</strong></div></div></section><section className="host-panel flex min-h-[380px] flex-col p-6"><div className="flex items-center justify-between"><h2 className="flex items-center gap-2 text-2xl font-bold"><Users className="size-5 text-[#ff6b4a]" />{players.length} {players.length === 1 ? "player" : "players"}</h2><span className="status-pill">Open</span></div><div className="mt-5 min-h-0 flex-1 space-y-2 overflow-auto">{players.length === 0 ? <div className="flex h-full min-h-48 flex-col items-center justify-center rounded-2xl border border-dashed border-white/15 text-center text-white/35"><Smartphone className="mb-3 size-8" /><p className="font-semibold">Waiting for players</p></div> : players.map((player) => <div key={player.playerId} className="flex items-center gap-3 rounded-2xl bg-white/[.045] px-4 py-3"><span className="flex size-9 items-center justify-center rounded-xl font-black" style={{ backgroundColor: player.color }}>{player.name[0]?.toUpperCase()}</span><span className="flex-1 font-semibold">{player.name}</span><span className={player.motionEnabled ? "text-xs font-bold text-[#44d79b]" : "text-xs text-white/30"}>{player.motionEnabled ? "Ready" : "Motion off"}</span></div>)}</div><Button className="mt-5 h-14 rounded-2xl bg-[#ff6b4a] text-base font-bold text-white hover:bg-[#ff7a5d]" disabled={!players.length || status !== "ready"} onClick={() => broadcastState({ phase: "language", questionIndex: 0, questionCount: 0 })}><Play className="mr-1 size-5 fill-current" />Start activity</Button></section></div></HostShell>;
+  }
 
-              <div className="grid flex-1 items-center gap-8 md:grid-cols-[minmax(230px,.75fr)_1.15fr]">
-                <div className="mx-auto w-full max-w-[270px] rounded-[2rem] bg-[#fffdf6] p-5 shadow-[0_24px_70px_rgba(0,0,0,.28)]">
-                  {roomUrl ? (
-                    <QRCodeSVG
-                      value={roomUrl}
-                      size={260}
-                      level="M"
-                      className="h-auto w-full"
-                      bgColor="#fffdf6"
-                      fgColor="#121521"
-                    />
-                  ) : (
-                    <div className="aspect-square animate-pulse rounded-2xl bg-black/5" />
-                  )}
-                </div>
+  if (gameState.phase === "language" || gameState.phase === "challenge") {
+    const languageStep = gameState.phase === "language";
+    const choices = languageStep ? [{ value: "en", title: "English", subtitle: "English questions" }, { value: "zh", title: "中文", subtitle: "中文题目" }] : [{ value: "1", title: gameState.language === "zh" ? "挑战一" : "Challenge 1", subtitle: gameState.language === "zh" ? "《十法经》" : "The Ten Teaching Sūtra" }, { value: "2", title: gameState.language === "zh" ? "挑战二" : "Challenge 2", subtitle: gameState.language === "zh" ? "《华严经》" : "The Array of Stalks Sūtra" }];
+    return <HostShell roomCode={roomCode} status={status} roomRemaining={roomRemaining}><section className="host-panel flex flex-1 flex-col p-7 sm:p-10"><div className="text-center"><span className="eyebrow">{languageStep ? "Step 1 of 2" : "Step 2 of 2"}</span><h1 className="mt-4 text-4xl font-black tracking-[-.04em] sm:text-6xl">{languageStep ? "Choose a language" : "Choose a challenge"}</h1><p className="mt-3 text-lg text-white/50">Move a cursor into a zone and keep it there for 5 seconds to confirm.</p></div><div className="mt-8 grid flex-1 gap-6 md:grid-cols-2">{choices.map((choice) => { const active = dwell?.value === choice.value; return <div key={choice.value} data-choice={choice.value} className={`relative flex min-h-64 flex-col items-center justify-center overflow-hidden rounded-[2rem] border-2 text-center transition ${active ? "border-[#44d79b] bg-[#44d79b]/14" : "border-dashed border-white/20 bg-white/[.04]"}`}><Languages className={`size-10 ${active ? "text-[#44d79b]" : "text-[#ff8b70]"}`} /><strong className="mt-5 text-4xl font-black">{choice.title}</strong><span className="mt-2 text-base text-white/45">{choice.subtitle}</span><div className="absolute inset-x-0 bottom-0 h-3 bg-white/8"><div className="h-full bg-[#44d79b] transition-[width] duration-100" style={{ width: active ? `${dwell.progress * 100}%` : "0%" }} /></div>{active && <span className="mt-5 font-mono text-sm font-bold text-[#44d79b]">Hold {Math.max(1, Math.ceil(5 - dwell.progress * 5))}s</span>}</div>; })}</div><AirMouseCursors players={players} cursors={cursors} dragging={{}} /></section></HostShell>;
+  }
 
-                <div className="space-y-7 text-center md:text-left">
-                  <div className="space-y-3">
-                    <p className="text-sm font-semibold uppercase tracking-[.24em] text-[#ff8b70]">
-                      Scan to jump straight in
-                    </p>
-                    <h1 className="text-balance text-4xl font-black leading-[.95] tracking-[-.04em] sm:text-6xl">
-                      Ready to sort it out?
-                    </h1>
-                    <p className="max-w-lg text-base leading-relaxed text-white/60 sm:text-lg">
-                      Scan the code, choose a nickname, and you&apos;re in this
-                      room. No room code screen in between.
-                    </p>
-                  </div>
-
-                  <div className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-5 py-4">
-                    <span className="text-sm text-white/50">Room code</span>
-                    <strong className="font-mono text-2xl tracking-[.22em] text-white">
-                      {roomCode || "------"}
-                    </strong>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section className="host-panel flex min-h-[360px] flex-col p-6">
-            <div className="mb-5 flex items-center justify-between">
-              <div>
-                <p className="text-sm text-white/45">Lobby</p>
-                <h2 className="mt-1 flex items-center gap-2 text-2xl font-bold">
-                  <Users className="size-5 text-[#ff6b4a]" />
-                  {players.length} {players.length === 1 ? "player" : "players"}
-                </h2>
-              </div>
-              <span className="status-pill">
-                <span className="size-2 rounded-full bg-[#44d79b] shadow-[0_0_0_4px_rgba(68,215,155,.12)]" />
-                Live
-              </span>
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-              {players.length === 0 ? (
-                <div className="flex h-full min-h-44 flex-col items-center justify-center rounded-2xl border border-dashed border-white/15 bg-white/[.025] text-center">
-                  <Smartphone className="mb-3 size-8 text-white/25" />
-                  <p className="font-semibold text-white/70">
-                    Waiting for players
-                  </p>
-                  <p className="mt-1 text-sm text-white/35">
-                    Names will pop up here
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-2.5">
-                  {players.map((player, index) => (
-                    <div
-                      key={player.playerId}
-                      className="flex items-center gap-3 rounded-2xl border border-white/8 bg-white/[.045] px-4 py-3.5"
-                    >
-                      <span
-                        className="flex size-9 items-center justify-center rounded-xl text-sm font-black text-white"
-                        style={{ backgroundColor: player.color }}
-                      >
-                        {player.name.charAt(0).toUpperCase()}
-                      </span>
-                      <span className="flex-1 font-semibold">
-                        {player.name}
-                      </span>
-                      <span
-                        className={`text-xs font-bold ${player.motionEnabled ? "text-[#44d79b]" : "text-white/30"}`}
-                      >
-                        {player.motionEnabled
-                          ? "Motion ready"
-                          : "Motion off"}
-                      </span>
-                      {index === 0 && (
-                        <Sparkles className="size-4 text-[#ffd166]" />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <Button
-              className="mt-5 h-14 w-full rounded-2xl bg-[#ff6b4a] text-base font-bold text-white shadow-[0_12px_30px_rgba(255,107,74,.24)] hover:bg-[#ff7a5d]"
-              disabled={players.length === 0 || status !== "ready"}
-              onClick={() => startQuestion(0)}
-            >
-              <Play className="mr-1 size-5 fill-current" />
-              Start {questionBank.length}-round game
-            </Button>
-          </section>
-        </div>
-      </HostShell>
-    );
+  if (gameState.phase === "memorise") {
+    const remaining = Math.max(0, (gameState.phaseEndsAt ?? now) - now);
+    return <HostShell roomCode={roomCode} status={status} roomRemaining={roomRemaining}><section className="host-panel flex flex-1 flex-col items-center justify-center overflow-hidden p-7 text-center sm:p-10"><div className="flex items-center gap-3"><span className="eyebrow">{gameState.challengeLabel}</span><span className="flex items-center gap-2 rounded-full bg-[#ffd166]/12 px-4 py-2 font-mono font-black text-[#ffd166]"><Clock3 className="size-4" />{formatTime(remaining)}</span></div><h1 className="mt-6 text-4xl font-black tracking-[-.04em] sm:text-6xl">Read, recite and memorise</h1><p className={`mt-8 max-w-6xl text-balance font-semibold leading-[1.75] text-white/80 ${gameState.language === "zh" ? "text-3xl" : "text-xl sm:text-2xl"}`}>{gameState.memoriseText}</p><p className="mt-8 text-sm font-bold uppercase tracking-[.18em] text-white/35">Questions begin automatically when time is up</p><AirMouseCursors players={players} cursors={cursors} dragging={{}} /></section></HostShell>;
   }
 
   if (gameState.phase === "finished") {
-    return (
-      <HostShell roomCode={roomCode} status={status}>
-        <section className="host-panel flex flex-1 flex-col items-center justify-center overflow-hidden p-8 text-center">
-          <div className="mb-5 flex size-20 items-center justify-center rounded-[1.6rem] bg-[#ffd166] text-[#171922] shadow-[0_18px_50px_rgba(255,209,102,.24)]">
-            <Trophy className="size-10" />
-          </div>
-          <span className="eyebrow">Final results</span>
-          <h1 className="mt-4 text-5xl font-black tracking-[-.04em] sm:text-7xl">
-            That&apos;s the game!
-          </h1>
-
-          <div className="mt-10 w-full max-w-2xl space-y-3">
-            {rankedPlayers.length === 0 ? (
-              <p className="rounded-2xl bg-white/5 p-6 text-white/50">
-                No scores yet.
-              </p>
-            ) : (
-              rankedPlayers.map((player, index) => (
-                <div
-                  key={player.playerId}
-                  className={`flex items-center gap-4 rounded-2xl border px-5 py-4 text-left ${
-                    index === 0
-                      ? "border-[#ffd166]/40 bg-[#ffd166]/10"
-                      : "border-white/8 bg-white/[.035]"
-                  }`}
-                >
-                  <span className="w-7 text-center text-xl font-black text-white/35">
-                    {index + 1}
-                  </span>
-                  <span
-                    className="flex size-11 items-center justify-center rounded-xl font-black"
-                    style={{ backgroundColor: player.color }}
-                  >
-                    {player.name.charAt(0).toUpperCase()}
-                  </span>
-                  <span className="flex-1 text-lg font-bold">
-                    {player.name}
-                  </span>
-                  {index === 0 && <Crown className="size-5 text-[#ffd166]" />}
-                  <strong className="font-mono text-xl">
-                    {player.score.toLocaleString()}
-                  </strong>
-                </div>
-              ))
-            )}
-          </div>
-
-          <Button
-            className="mt-8 h-13 rounded-2xl bg-white px-7 font-bold text-[#151722] hover:bg-white/90"
-            onClick={playAgain}
-          >
-            <RotateCcw className="mr-1 size-4" />
-            Back to lobby
-          </Button>
-        </section>
-      </HostShell>
-    );
+    return <HostShell roomCode={roomCode} status={status} roomRemaining={roomRemaining}><section className="host-panel flex flex-1 flex-col items-center justify-center p-8 text-center"><div className="flex size-20 items-center justify-center rounded-[1.6rem] bg-[#ffd166] text-[#171922]"><Trophy className="size-10" /></div><span className="eyebrow mt-6">{gameState.challengeLabel} complete</span><h1 className="mt-4 text-5xl font-black tracking-[-.04em] sm:text-7xl">{formatTime(elapsed)}</h1><p className="mt-2 text-white/45">Final time includes +{Math.round((gameState.penaltyMs ?? 0) / 1_000)}s from hints</p><div className="mt-8 w-full max-w-2xl space-y-2">{rankedPlayers.map((player, index) => <div key={player.playerId} className={`flex items-center gap-4 rounded-2xl border px-5 py-4 text-left ${index === 0 ? "border-[#ffd166]/40 bg-[#ffd166]/10" : "border-white/8 bg-white/[.035]"}`}><span className="w-7 text-xl font-black text-white/30">{index + 1}</span><span className="flex size-10 items-center justify-center rounded-xl font-black" style={{ backgroundColor: player.color }}>{player.name[0]?.toUpperCase()}</span><span className="flex-1 text-lg font-bold">{player.name}</span>{index === 0 && <Crown className="size-5 text-[#ffd166]" />}<strong className="font-mono">{player.score} pts</strong></div>)}</div><Button className="mt-8 h-13 rounded-2xl bg-white px-7 font-bold text-[#151722] hover:bg-white/90" onClick={openFreshRoom}><RotateCcw className="mr-1 size-4" />New group &amp; new code</Button></section></HostShell>;
   }
 
-  return (
-    <HostShell roomCode={roomCode} status={status}>
-      <div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <QuestionStage
-          question={gameState.question}
-          questionIndex={gameState.questionIndex}
-          questionCount={gameState.questionCount}
-          solvedAnswers={solvedAnswers}
-          dragging={dragging}
-          players={players}
-        />
-
-        <aside className="host-panel flex min-h-[320px] flex-col p-6">
-          <div className="flex items-center justify-between border-b border-white/8 pb-5">
-            <div>
-              <p className="text-sm text-white/45">Cards sorted</p>
-              <p className="mt-1 text-3xl font-black">
-                {solvedCount}
-                <span className="text-white/25">/{activeAnswerCount}</span>
-              </p>
-            </div>
-            <div className="flex size-12 items-center justify-center rounded-2xl bg-[#44d79b]/10 text-[#44d79b]">
-              <Check className="size-6" />
-            </div>
-          </div>
-
-          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto py-5">
-            {players.map((player) => {
-              const entry = scores[player.playerId];
-              const isReady = readyPlayerIds.includes(player.playerId);
-              return (
-                <div
-                  key={player.playerId}
-                  className={`flex items-center gap-3 rounded-xl px-3.5 py-3 transition-colors ${
-                    isReady ? "bg-[#44d79b]/12" : "bg-white/[.035]"
-                  }`}
-                >
-                  <span
-                    className={`size-2.5 rounded-full ${isReady ? "ring-4 ring-[#44d79b]/15" : ""}`}
-                    style={{ backgroundColor: player.color }}
-                  />
-                  <span className="min-w-0 flex-1 truncate font-semibold">
-                    {player.name}
-                  </span>
-                  <span
-                    className={`text-right text-xs ${isReady ? "font-bold text-[#44d79b]" : "text-white/35"}`}
-                  >
-                    {isReady
-                      ? "Ready"
-                      : (lastActions[player.playerId] ?? "Move your cursor")}
-                  </span>
-                  <strong className="min-w-12 text-right font-mono text-sm">
-                    {entry?.score ?? 0}
-                  </strong>
-                </div>
-              );
-            })}
-          </div>
-
-          {roundComplete ? (
-            <div
-              data-next-zone
-              className={`relative flex min-h-40 flex-col items-center justify-center overflow-hidden rounded-[1.6rem] border-2 p-5 text-center transition-colors ${
-                allPlayersReady
-                  ? "border-[#44d79b] bg-[#44d79b]/18"
-                  : "border-dashed border-[#ff8b70]/55 bg-[#ff6b4a]/10"
-              }`}
-            >
-              <div className="absolute inset-x-0 bottom-0 h-1.5 bg-white/8">
-                <div
-                  className="h-full bg-[#44d79b] transition-[width] duration-300"
-                  style={{
-                    width: `${players.length ? (readyPlayerIds.length / players.length) * 100 : 0}%`,
-                  }}
-                />
-              </div>
-              {countdown !== null ? (
-                <>
-                  <span className="font-mono text-6xl font-black text-[#44d79b]">
-                    {countdown}
-                  </span>
-                  <span className="mt-1 text-sm font-bold text-white/65">
-                    Launching next question…
-                  </span>
-                </>
-              ) : (
-                <>
-                  <ArrowRight className="size-8 text-[#ff8b70]" />
-                  <strong className="mt-2 text-xl">
-                    {gameState.questionIndex === questionBank.length - 1
-                      ? "Fly every cursor here for results"
-                      : "Fly every cursor here for the next question"}
-                  </strong>
-                  <span className="mt-2 font-mono text-sm font-bold text-white/50">
-                    {readyPlayerIds.length}/{players.length} ready
-                  </span>
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="flex min-h-24 items-center justify-center rounded-2xl border border-dashed border-white/10 px-4 text-center text-sm font-semibold text-white/30">
-              Sort every card to unlock the next-question zone
-            </div>
-          )}
-        </aside>
-      </div>
-      <AirMouseCursors
-        players={players}
-        cursors={cursors}
-        dragging={dragging}
-        question={gameState.question}
-      />
-    </HostShell>
-  );
+  return <HostShell roomCode={roomCode} status={status} roomRemaining={roomRemaining}><div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]"><QuestionStage question={gameState.question} questionIndex={gameState.questionIndex} questionCount={gameState.questionCount} solvedAnswers={solvedAnswers} dragging={dragging} players={players} /><aside className="host-panel flex flex-col p-6"><div className="flex items-center justify-between border-b border-white/8 pb-5"><div><p className="text-sm text-white/40">Challenge time</p><p className="mt-1 font-mono text-3xl font-black">{formatTime(elapsed)}</p></div><span className="rounded-xl bg-[#ffd166]/12 px-3 py-2 text-sm font-bold text-[#ffd166]">+{Math.round((gameState.penaltyMs ?? 0) / 1_000)}s</span></div><div className="mt-5 rounded-2xl bg-white/[.035] p-4"><p className="text-sm text-white/40">Phrase progress</p><p className="mt-1 text-3xl font-black">{solvedCount}<span className="text-white/25">/{activeAnswerCount}</span></p></div><div className="mt-4 min-h-0 flex-1 space-y-2 overflow-auto">{players.map((player) => <div key={player.playerId} className="flex items-center gap-3 rounded-xl bg-white/[.035] px-3 py-3"><span className="size-2.5 rounded-full" style={{ backgroundColor: player.color }} /><span className="min-w-0 flex-1 truncate font-semibold">{player.name}</span><span className="max-w-32 truncate text-xs text-white/35">{lastActions[player.playerId] ?? "Aiming"}</span><strong className="font-mono text-sm">{scores[player.playerId]?.score ?? 0}</strong></div>)}</div><div data-hint-zone className="mt-4 flex min-h-28 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[#ffd166]/35 bg-[#ffd166]/8 p-4 text-center"><Lightbulb className="size-6 text-[#ffd166]" /><strong className="mt-2">Need a hint?</strong><span className="mt-1 text-xs text-white/40">Aim here and tap Grab to fill one part (+5s)</span></div></aside></div><AirMouseCursors players={players} cursors={cursors} dragging={dragging} question={gameState.question} /></HostShell>;
 }
 
-function HostShell({
-  roomCode,
-  status,
-  children,
-}: {
-  roomCode: string;
-  status: ConnectionStatus;
-  children: React.ReactNode;
-}) {
-  return (
-    <main className="game-shell min-h-dvh bg-[#11131d] p-4 text-white sm:p-6">
-      <div className="mx-auto flex min-h-[calc(100dvh-2rem)] max-w-[1500px] flex-col gap-5 sm:min-h-[calc(100dvh-3rem)]">
-        <header className="flex items-center justify-between px-1">
-          <div className="flex items-center gap-3">
-            <span className="flex size-10 items-center justify-center rounded-2xl bg-[#ff6b4a] shadow-[0_10px_30px_rgba(255,107,74,.25)]">
-              <Gamepad2 className="size-5" />
-            </span>
-            <div>
-              <p className="text-lg font-black leading-none tracking-[-.03em]">
-                AirMouse
-              </p>
-              <p className="mt-1 text-[10px] font-bold uppercase tracking-[.22em] text-white/35">
-                Host screen
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {(status === "connecting" || status === "reconnecting") && (
-              <LoaderCircle className="size-4 animate-spin text-white/40" />
-            )}
-            {status === "error" && <WifiOff className="size-4 text-red-400" />}
-            <span className="hidden text-xs text-white/35 sm:inline">Room</span>
-            <strong className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-mono tracking-[.18em]">
-              {roomCode || "------"}
-            </strong>
-          </div>
-        </header>
-        {children}
-      </div>
-    </main>
-  );
+function HostShell({ roomCode, status, roomRemaining, children }: { roomCode: string; status: ConnectionStatus; roomRemaining: number; children: React.ReactNode }) {
+  return <main className="game-shell min-h-dvh bg-[#11131d] p-4 text-white sm:p-6"><div className="mx-auto flex min-h-[calc(100dvh-2rem)] max-w-[1500px] flex-col gap-5 sm:min-h-[calc(100dvh-3rem)]"><header className="flex items-center justify-between px-1"><div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-2xl bg-[#ff6b4a]"><Gamepad2 className="size-5" /></span><div><p className="text-lg font-black leading-none">AirMouse</p><p className="mt-1 text-[10px] font-bold uppercase tracking-[.2em] text-white/35">Lamrim activity</p></div></div><div className="flex items-center gap-3">{(status === "connecting" || status === "reconnecting") && <LoaderCircle className="size-4 animate-spin text-white/40" />}{status === "error" && <WifiOff className="size-4 text-red-400" />}<span className="hidden items-center gap-1.5 text-xs text-white/40 sm:flex"><Clock3 className="size-3.5" />code {formatTime(roomRemaining)}</span><strong className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-mono tracking-[.18em]">{roomCode || "------"}</strong></div></header>{children}</div></main>;
 }
 
-function QuestionStage({
-  question,
-  questionIndex,
-  questionCount,
-  solvedAnswers,
-  dragging,
-  players,
-}: {
-  question?: PublicQuestion;
-  questionIndex: number;
-  questionCount: number;
-  solvedAnswers: Record<string, SolvedAnswer>;
-  dragging: Record<string, string>;
-  players: PlayerPresence[];
-}) {
+function QuestionStage({ question, questionIndex, questionCount, solvedAnswers, dragging, players }: { question?: PublicQuestion; questionIndex: number; questionCount: number; solvedAnswers: Record<string, SolvedAnswer>; dragging: Record<string, string>; players: PlayerPresence[] }) {
   if (!question) return null;
-
-  const heldAnswerIds = new Set(Object.values(dragging));
-  const playerLookup = new Map(
-    players.map((player) => [player.playerId, player]),
-  );
-
-  return (
-    <section className="host-panel flex flex-col overflow-hidden p-6 sm:p-8">
-      <div className="flex items-center justify-between">
-        <span className="eyebrow">
-          Question {questionIndex + 1} of {questionCount}
-        </span>
-        <span className="flex items-center gap-2 text-sm text-white/35">
-          <MousePointer2 className="size-4" /> AirMouse controls active
-        </span>
-      </div>
-      <h1 className="mt-5 max-w-5xl text-balance text-3xl font-black leading-[1.02] tracking-[-.04em] sm:text-5xl">
-        {question.prompt}
-      </h1>
-      <p className="mt-3 text-lg font-semibold text-[#ffb09e]">
-        {question.instruction}
-      </p>
-      <p className="mt-1 text-sm text-white/45">
-        Drag every card — hold Grab over a large card, steer it to a box, then
-        release.
-      </p>
-
-      <div
-        className={`mt-5 grid flex-1 content-center gap-4 ${question.targets.length === 3 ? "md:grid-cols-3" : "md:grid-cols-2"}`}
-      >
-        {question.targets.map((target, index) => {
-          const placedAnswers = question.answers.filter(
-            (answer) => solvedAnswers[answer.id]?.targetId === target.id,
-          );
-
-          return (
-            <div
-              key={target.id}
-              data-answer-target={target.id}
-              className="relative flex min-h-56 flex-col justify-between overflow-hidden rounded-[1.8rem] border-2 border-dashed border-white/20 bg-white/[.055] p-6 transition-colors"
-            >
-              <span className="absolute -right-4 -top-7 text-[8rem] font-black leading-none text-white/[.025]">
-                {index + 1}
-              </span>
-              <div className="relative pointer-events-none">
-                <p className="text-3xl font-black">{target.label}</p>
-                <p className="mt-2 text-base text-white/40">{target.hint}</p>
-              </div>
-              <div className="relative mt-5 flex min-h-12 flex-wrap content-end gap-2 pointer-events-none">
-                {placedAnswers.length === 0 ? (
-                  <span className="rounded-lg border border-dashed border-white/10 px-3 py-2 text-xs text-white/20">
-                    Drop here
-                  </span>
-                ) : (
-                  placedAnswers.map((answer) => {
-                    const owner = playerLookup.get(
-                      solvedAnswers[answer.id].playerId,
-                    );
-                    return (
-                      <span
-                        key={answer.id}
-                        className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-[#fffdf6] px-4 py-3 text-lg font-bold text-[#191b26] shadow-lg"
-                      >
-                        <span
-                          className="size-2 rounded-full"
-                          style={{
-                            backgroundColor: owner?.color ?? FALLBACK_COLOR,
-                          }}
-                        />
-                        {answer.label}
-                      </span>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="mt-5 min-h-24 rounded-[1.5rem] border border-white/10 bg-black/20 p-4">
-        <div className="flex flex-wrap justify-center gap-3">
-          {question.answers
-            .filter(
-              (answer) =>
-                !solvedAnswers[answer.id] && !heldAnswerIds.has(answer.id),
-            )
-            .map((answer) => (
-              <span
-                key={answer.id}
-                data-answer-card={answer.id}
-                className="inline-flex min-h-20 min-w-44 cursor-none items-center justify-center rounded-2xl bg-[#fffdf6] px-7 py-5 text-center text-xl font-black text-[#191b26] shadow-xl ring-2 ring-transparent"
-              >
-                {answer.label}
-              </span>
-            ))}
-          {question.answers.every(
-            (answer) =>
-              solvedAnswers[answer.id] || heldAnswerIds.has(answer.id),
-          ) && (
-            <span className="px-2 py-2 text-sm font-semibold text-white/35">
-              All cards are being sorted
-            </span>
-          )}
-        </div>
-      </div>
-    </section>
-  );
+  const heldIds = new Set(Object.values(dragging));
+  const playerLookup = new Map(players.map((player) => [player.playerId, player]));
+  return <section className="host-panel flex flex-col overflow-hidden p-6 sm:p-8"><div className="flex items-center justify-between"><span className="eyebrow">Question {questionIndex + 1} of {questionCount}</span><span className="flex items-center gap-2 text-sm text-white/35"><MousePointer2 className="size-4" />AirMouse live</span></div><h1 className="mt-5 text-balance text-3xl font-black leading-[1.15] tracking-[-.035em] sm:text-5xl">{question.prompt}</h1><p className="mt-3 text-lg font-semibold text-[#ffb09e]">{question.instruction}</p><div className="mt-7 grid flex-1 content-center gap-4" style={{ gridTemplateColumns: `repeat(${question.targets.length}, minmax(0, 1fr))` }}>{question.targets.map((target) => { const answer = question.answers.find((item) => solvedAnswers[item.id]?.targetId === target.id); const owner = answer ? playerLookup.get(solvedAnswers[answer.id].playerId) : undefined; return <div key={target.id} data-answer-target={target.id} className="flex min-h-40 flex-col items-center justify-center rounded-[1.6rem] border-2 border-dashed border-white/20 bg-white/[.05] p-4 text-center"><span className="font-mono text-sm text-white/30">[{target.label}]</span>{answer ? <span className="mt-3 rounded-xl bg-[#fffdf6] px-4 py-3 text-lg font-black text-[#191b26] shadow-xl"><span className="mr-2 inline-block size-2 rounded-full" style={{ backgroundColor: owner?.color ?? "#ffd166" }} />{answer.label}</span> : <span className="mt-3 text-sm text-white/25">Drop part {target.label} here</span>}</div>; })}</div><div className="mt-5 min-h-28 rounded-[1.5rem] border border-white/10 bg-black/20 p-4"><div className="flex flex-wrap justify-center gap-3">{question.answers.filter((answer) => !solvedAnswers[answer.id] && !heldIds.has(answer.id)).map((answer) => <span key={answer.id} data-answer-card={answer.id} className="inline-flex min-h-20 min-w-40 cursor-none items-center justify-center rounded-2xl bg-[#fffdf6] px-6 py-4 text-center text-lg font-black text-[#191b26] shadow-xl"><Hand className="mr-2 size-4 text-[#ff6b4a]" />{answer.label}</span>)}{question.answers.every((answer) => solvedAnswers[answer.id] || heldIds.has(answer.id)) && <span className="py-4 font-bold text-[#44d79b]"><Check className="mr-2 inline size-5" />Phrase complete</span>}</div></div></section>;
 }
 
-function AirMouseCursors({
-  players,
-  cursors,
-  dragging,
-  question,
-}: {
-  players: PlayerPresence[];
-  cursors: Record<string, CursorPosition>;
-  dragging: Record<string, string>;
-  question?: PublicQuestion;
-}) {
+function AirMouseCursors({ players, cursors, dragging, question }: { players: PlayerPresence[]; cursors: Record<string, CursorPosition>; dragging: Record<string, string>; question?: PublicQuestion }) {
   return players.map((player) => {
     const cursor = cursors[player.playerId];
-    const heldAnswerId = dragging[player.playerId];
-    const heldAnswer = question?.answers.find(
-      (answer) => answer.id === heldAnswerId,
-    );
-
+    const held = question?.answers.find((answer) => answer.id === dragging[player.playerId]);
     if (!cursor) return null;
-
-    return (
-      <div
-        key={player.playerId}
-        className="pointer-events-none fixed left-0 top-0 z-[100]"
-        style={{
-          transform: `translate3d(${cursor.x}px, ${cursor.y}px, 0)`,
-          transition: "transform 80ms linear",
-          willChange: "transform",
-        }}
-      >
-        {heldAnswer && (
-          <div className="absolute bottom-5 left-5 whitespace-nowrap rounded-xl bg-[#fffdf6] px-4 py-3 font-bold text-[#191b26] shadow-2xl ring-2 ring-white/70">
-            {heldAnswer.label}
-          </div>
-        )}
-        <div
-          className="absolute -left-1 -top-1 size-7 rounded-full border-[3px] border-white shadow-xl"
-          style={{ backgroundColor: player.color }}
-        >
-          <span className="absolute left-1/2 top-1/2 size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />
-        </div>
-        <span
-          className="absolute left-5 top-5 whitespace-nowrap rounded-lg px-2 py-1 text-[11px] font-black text-white shadow-lg"
-          style={{ backgroundColor: player.color }}
-        >
-          {player.name}
-        </span>
-      </div>
-    );
+    return <div key={player.playerId} className="pointer-events-none fixed left-0 top-0 z-[100]" style={{ transform: `translate3d(${cursor.x}px, ${cursor.y}px, 0)`, transition: "transform 80ms linear", willChange: "transform" }}>{held && <div className="absolute bottom-5 left-5 whitespace-nowrap rounded-xl bg-[#fffdf6] px-4 py-3 font-bold text-[#191b26] shadow-2xl">{held.label}</div>}<div className="absolute -left-1 -top-1 size-7 rounded-full border-[3px] border-white shadow-xl" style={{ backgroundColor: player.color }}><span className="absolute left-1/2 top-1/2 size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" /></div><span className="absolute left-5 top-5 whitespace-nowrap rounded-lg px-2 py-1 text-[11px] font-black text-white shadow-lg" style={{ backgroundColor: player.color || FALLBACK_COLOR }}>{player.name}</span></div>;
   });
 }
