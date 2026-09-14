@@ -582,8 +582,8 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
             Hey, {nickname}!
           </h1>
           <p className="mt-3 max-w-xs text-[#696c76]">
-            AirMouse motion is active. Keep this phone pointed at the host
-            screen.
+            Keep your phone pointed at the host screen, then move your hand
+            cursor into the shared start zone with everyone else.
           </p>
 
           <div className="mt-5 flex items-center gap-2 rounded-full border border-black/8 bg-white px-4 py-2.5 text-sm font-semibold shadow-sm">
@@ -636,7 +636,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
         ? "Choose the language"
         : "Choose the challenge";
     const description = isMemorising
-      ? "Read or recite the passage on the shared screen. The questions begin automatically after 30 seconds."
+      ? "Read or recite the passage on the shared screen. The questions begin automatically after 45 seconds."
       : "Steer your colored cursor into a choice zone on the shared screen and keep it there for 5 seconds.";
 
     return (
@@ -775,7 +775,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
         {feedback && (
           <div
-            className={`rounded-2xl p-4 ${feedback.correct ? "bg-[#e4f8ef] text-[#087653]" : "bg-[#fff0ec] text-[#b43c25]"}`}
+            className={`rounded-2xl p-4 ${feedback.correct ? "bg-[#dff5e8] text-[#087653]" : "bg-[#ffe0c2] text-[#9a3f17]"}`}
           >
             <div className="flex items-center gap-3">
               {feedback.correct ? (
@@ -813,7 +813,7 @@ function PhoneShell({
   children: React.ReactNode;
 }) {
   return (
-    <main className="player-shell min-h-dvh bg-[#f4f2ec] px-4 text-[#171922]">
+    <main className="light-mode player-shell min-h-dvh bg-[#f4f8f5] px-4 text-[#171922]">
       <div className="mx-auto flex min-h-dvh w-full max-w-lg flex-col">
         <header className="flex items-center justify-between border-b border-black/[.06] py-4">
           <div className="flex items-center gap-2.5">

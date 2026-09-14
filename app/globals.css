@@ -133,6 +133,10 @@ body {
   min-width: 320px;
 }
 
+html {
+  font-size: 17px;
+}
+
 button,
 input {
   font: inherit;
@@ -140,15 +144,15 @@ input {
 
 .game-shell {
   background-image:
-    radial-gradient(circle at 15% 5%, rgba(92, 124, 250, 0.11), transparent 28rem),
-    radial-gradient(circle at 85% 100%, rgba(255, 107, 74, 0.09), transparent 32rem);
+    radial-gradient(circle at 12% 0%, rgba(39, 142, 88, 0.13), transparent 30rem),
+    radial-gradient(circle at 90% 100%, rgba(229, 107, 53, 0.10), transparent 34rem);
 }
 
 .host-panel {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(23, 33, 28, 0.1);
   border-radius: 1.75rem;
-  background: rgba(255, 255, 255, 0.035);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 18px 55px rgba(30, 73, 50, 0.08);
 }
 
 .eyebrow,
@@ -164,9 +168,9 @@ input {
 }
 
 .eyebrow {
-  border: 1px solid rgba(255, 107, 74, 0.28);
-  background: rgba(255, 107, 74, 0.09);
-  color: #ff927a;
+  border: 1px solid rgba(229, 107, 53, 0.25);
+  background: #fff1e7;
+  color: #b84b1e;
 }
 
 .player-eyebrow {
@@ -178,19 +182,64 @@ input {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(23, 33, 28, 0.1);
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.16);
+  background: #edf4ef;
   padding: 0.45rem 0.7rem;
   font-size: 0.72rem;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.58);
+  color: #53615a;
 }
 
 .player-shell {
   background-image:
     radial-gradient(circle at 100% 0%, rgba(255, 107, 74, 0.12), transparent 20rem),
     radial-gradient(circle at 0% 100%, rgba(92, 124, 250, 0.08), transparent 24rem);
+}
+
+.light-mode [class~="text-white/20"],
+.light-mode [class~="text-white/25"],
+.light-mode [class~="text-white/30"],
+.light-mode [class~="text-white/35"],
+.light-mode [class~="text-white/40"],
+.light-mode [class~="text-white/45"],
+.light-mode [class~="text-white/50"],
+.light-mode [class~="text-white/55"],
+.light-mode [class~="text-white/58"],
+.light-mode [class~="text-white/65"],
+.light-mode [class~="text-white/70"],
+.light-mode [class~="text-white/80"],
+.light-mode [class~="text-white/85"] {
+  color: #66736c !important;
+}
+
+.light-mode [class~="border-white/6"],
+.light-mode [class~="border-white/8"],
+.light-mode [class~="border-white/10"],
+.light-mode [class~="border-white/12"],
+.light-mode [class~="border-white/15"],
+.light-mode [class~="border-white/20"],
+.light-mode [class~="border-white/25"] {
+  border-color: rgba(23, 33, 28, 0.12) !important;
+}
+
+.light-mode [class~="bg-white/5"],
+.light-mode [class~="bg-white/[.03]"],
+.light-mode [class~="bg-white/[.035]"],
+.light-mode [class~="bg-white/[.04]"],
+.light-mode [class~="bg-white/[.045]"],
+.light-mode [class~="bg-white/[.05]"],
+.light-mode [class~="bg-white/[.06]"],
+.light-mode [class~="bg-white/8"] {
+  background-color: rgba(23, 33, 28, 0.045) !important;
+}
+
+.light-mode [class~="bg-black/20"] {
+  background-color: #edf4ef !important;
+}
+
+.light-mode .keep-white {
+  color: white !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

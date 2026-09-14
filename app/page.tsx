@@ -27,11 +27,11 @@ export default function HomePage() {
   }
 
   return (
-    <main className="game-shell min-h-dvh overflow-hidden bg-[#11131d] p-4 text-white sm:p-6">
+    <main className="light-mode game-shell min-h-dvh overflow-hidden bg-[#eef7f0] p-4 text-[#17211c] sm:p-6">
       <div className="mx-auto flex min-h-[calc(100dvh-2rem)] max-w-6xl flex-col sm:min-h-[calc(100dvh-3rem)]">
         <header className="flex items-center justify-between py-2">
           <div className="flex items-center gap-3">
-            <span className="flex size-10 items-center justify-center rounded-2xl bg-[#ff6b4a] shadow-[0_10px_30px_rgba(255,107,74,.25)]">
+            <span className="keep-white flex size-10 items-center justify-center rounded-2xl bg-[#e56b35] text-white shadow-[0_10px_30px_rgba(229,107,53,.2)]">
               <Gamepad2 className="size-5" />
             </span>
             <strong className="text-xl font-black tracking-[-.04em]">
@@ -41,7 +41,7 @@ export default function HomePage() {
 
           <Button
             variant="outline"
-            className="rounded-xl border-white/12 bg-white/5 text-white hover:bg-white/10 hover:text-white"
+            className="rounded-xl border-black/10 bg-white text-[#17211c] hover:bg-[#edf4ef] hover:text-[#17211c]"
             onClick={() => router.push("/screen")}
           >
             <MonitorUp className="mr-1 size-4" />
@@ -118,7 +118,7 @@ export default function HomePage() {
                   autoCapitalize="characters"
                   autoCorrect="off"
                   spellCheck={false}
-                  className="mt-2.5 h-16 rounded-2xl border-white/10 bg-black/20 text-center font-mono text-2xl font-bold uppercase tracking-[.28em] text-white placeholder:text-white/15 focus-visible:border-[#ff6b4a]/60 focus-visible:ring-[#ff6b4a]/15"
+                  className="mt-2.5 h-16 rounded-2xl border-black/10 bg-[#edf4ef] text-center font-mono text-2xl font-bold uppercase tracking-[.28em] text-[#17211c] placeholder:text-black/20 focus-visible:border-[#e56b35]/60 focus-visible:ring-[#e56b35]/15"
                   onChange={(event) =>
                     setRoomCode(
                       event.target.value
@@ -133,7 +133,7 @@ export default function HomePage() {
               </div>
 
               <Button
-                className="mt-4 h-14 w-full rounded-2xl bg-[#ff6b4a] text-base font-black text-white shadow-[0_12px_30px_rgba(255,107,74,.2)] hover:bg-[#ff7a5d]"
+                className="keep-white mt-4 h-14 w-full rounded-2xl bg-[#e56b35] text-base font-black text-white shadow-[0_12px_30px_rgba(229,107,53,.18)] hover:bg-[#c95727]"
                 disabled={roomCode.length !== 6}
                 onClick={joinRoom}
               >
