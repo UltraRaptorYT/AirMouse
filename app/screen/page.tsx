@@ -1080,7 +1080,7 @@ export default function ScreenPage() {
             Read, recite and memorise
           </h1>
           <p
-            className={`mt-8 max-w-6xl text-balance font-semibold leading-[1.75] text-white/80 ${gameState.language === "zh" ? "text-3xl" : "text-xl sm:text-2xl"}`}
+            className={`mt-8 max-w-6xl text-balance font-semibold leading-[1.75] text-white/80 ${gameState.language === "zh" ? "text-5xl" : "text-xl sm:text-3xl"}`}
           >
             {gameState.memoriseText}
           </p>
