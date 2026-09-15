@@ -7,6 +7,7 @@ import type {
   PlayerPresence,
   ServerRoomMessage,
 } from "../lib/realtime/types";
+import { colorForPlayer, PLAYER_COLORS } from "../lib/realtime/colors";
 
 type SocketAttachment = {
   role: "host" | "player";
@@ -57,6 +58,44 @@ function isPlayerPresence(value: unknown): value is PlayerPresence {
     typeof player.color === "string" &&
     typeof player.onlineAt === "string"
   );
+}
+
+function allocatePlayerColor(
+  requestedColor: string,
+  playerId: string,
+  players: PlayerPresence[],
+) {
+  const usedColors = new Set(
+    players
+      .filter((player) => player.playerId !== playerId)
+      .map((player) => player.color.toLowerCase()),
+  );
+  const requested = requestedColor.toLowerCase();
+  if (
+    PLAYER_COLORS.some((color) => color === requested) &&
+    !usedColors.has(requested)
+  ) {
+    return requested;
+  }
+
+  const preferred = colorForPlayer(playerId);
+  const preferredIndex = PLAYER_COLORS.indexOf(preferred);
+  for (let offset = 0; offset < PLAYER_COLORS.length; offset += 1) {
+    const candidate =
+      PLAYER_COLORS[(preferredIndex + offset) % PLAYER_COLORS.length];
+    if (!usedColors.has(candidate)) return candidate;
+  }
+
+  let hue = [...playerId].reduce(
+    (total, character) => (total * 31 + character.charCodeAt(0)) % 360,
+    0,
+  );
+  for (let attempt = 0; attempt < 360; attempt += 1) {
+    const candidate = `hsl(${hue} 72% 42%)`;
+    if (!usedColors.has(candidate)) return candidate;
+    hue = (hue + 47) % 360;
+  }
+  return preferred;
 }
 
 function sanitizeLeaderboardEntry(value: unknown): LeaderboardEntry | null {
@@ -217,7 +256,11 @@ export class Room extends DurableObject<Env> {
         kind: "player",
         playerId: attachment.clientId,
         name: message.payload.name.trim().replace(/\s+/g, " ").slice(0, 18),
-        color: message.payload.color.slice(0, 32),
+        color: allocatePlayerColor(
+          message.payload.color.slice(0, 32),
+          attachment.clientId,
+          this.getPresence().players,
+        ),
         onlineAt: new Date().toISOString(),
         motionEnabled: Boolean(message.payload.motionEnabled),
       };
@@ -378,11 +421,30 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/health") {
-      return jsonResponse({ ok: true, service: "airmouse-realtime" });
+      try {
+        const leaderboard = env.LEADERBOARD.getByName(LEADERBOARD_ID);
+        await leaderboard.list();
+        return jsonResponse({
+          ok: true,
+          service: "airmouse-realtime",
+          leaderboard: "connected",
+        });
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            message: "Leaderboard health check failed",
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        return jsonResponse(
+          { ok: false, service: "airmouse-realtime", leaderboard: "error" },
+          503,
+        );
+      }
     }
 
     if (url.pathname === "/leaderboard" && request.method === "GET") {
-      const leaderboard = env.LEADERBOARD.get(env.LEADERBOARD.idFromName(LEADERBOARD_ID));
+      const leaderboard = env.LEADERBOARD.getByName(LEADERBOARD_ID);
       return jsonResponse({ entries: await leaderboard.list() });
     }
 

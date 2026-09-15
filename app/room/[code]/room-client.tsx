@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { TbHandGrab, TbHandStop } from "react-icons/tb";
 import {
   ArrowRight,
   ArrowUp,
@@ -9,7 +10,6 @@ import {
   Crosshair,
   Clock3,
   Gamepad2,
-  Hand,
   Languages,
   LoaderCircle,
   Move3d,
@@ -22,6 +22,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { colorForPlayer, PLAYER_COLORS } from "@/lib/realtime/colors";
 import {
   createRoomSocket,
   type RoomConnectionStatus,
@@ -41,7 +42,6 @@ type PermissionCapableEvent = {
   requestPermission?: () => Promise<"granted" | "denied">;
 };
 
-const PLAYER_COLORS = ["#ff6b4a", "#5c7cfa", "#15a97b", "#b259e8", "#d89b22"];
 const HORIZONTAL_AIM_RANGE_DEGREES = 32;
 const VERTICAL_AIM_RANGE_DEGREES = 24;
 // Light sensor smoothing only; the host interpolates per frame, so heavy smoothing here just adds lag.
@@ -79,7 +79,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   const [nickname, setNickname] = useState("");
   const [joined, setJoined] = useState(false);
   const [playerId, setPlayerId] = useState("");
-  const [playerColor, setPlayerColor] = useState(PLAYER_COLORS[0]);
+  const [playerColor, setPlayerColor] = useState<string>(PLAYER_COLORS[0]);
   const [sensorStatus, setSensorStatus] = useState<SensorStatus>("idle");
   const [calibrated, setCalibrated] = useState(false);
   const [isHolding, setIsHolding] = useState(false);
@@ -105,7 +105,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   const holdingRef = useRef(false);
   const joinedRef = useRef(false);
   const nicknameRef = useRef("");
-  const playerColorRef = useRef(PLAYER_COLORS[0]);
+  const playerColorRef = useRef<string>(PLAYER_COLORS[0]);
   const sensorStatusRef = useRef<SensorStatus>("idle");
   const currentQuestionIdRef = useRef<string | undefined>(undefined);
 
@@ -117,13 +117,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     const storedScore = Number(
       sessionStorage.getItem(`airmouse-score-${roomCode}`) ?? "0",
     );
-    const colorIndex =
-      Math.abs(
-        id
-          .split("")
-          .reduce((total, character) => total + character.charCodeAt(0), 0),
-      ) % PLAYER_COLORS.length;
-    const color = PLAYER_COLORS[colorIndex];
+    const color = colorForPlayer(id);
 
     joinedRef.current = false;
     nicknameRef.current = storedName;
@@ -140,6 +134,11 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     function handleMessage(message: ServerRoomMessage) {
       if (message.type === "connected" || message.type === "presence") {
         setHostOnline(message.hostOnline);
+        const self = message.players.find((player) => player.playerId === id);
+        if (self?.color && self.color !== playerColorRef.current) {
+          playerColorRef.current = self.color;
+          setPlayerColor(self.color);
+        }
         return;
       }
 
@@ -762,7 +761,11 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
                 if (event.key === " " || event.key === "Enter") releaseGrab();
               }}
             >
-              <Hand className={`size-14 ${isHolding ? "fill-white/20" : ""}`} />
+              {isHolding ? (
+                <TbHandGrab className="size-16" aria-hidden="true" />
+              ) : (
+                <TbHandStop className="size-16" aria-hidden="true" />
+              )}
               <span className="mt-3 text-xl">
                 {isHolding ? "Release to drop" : "Hold to grab"}
               </span>

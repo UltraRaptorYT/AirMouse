@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
+import { TbHandGrab, TbHandStop } from "react-icons/tb";
 import {
   Check,
   Clock3,
   Crown,
   Gamepad2,
-  HandGrab,
   Languages,
   Lightbulb,
   LoaderCircle,
@@ -942,7 +942,7 @@ export default function ScreenPage() {
               data-start-zone
               className={`relative mt-5 flex min-h-40 flex-1 flex-col items-center justify-center overflow-hidden rounded-[1.75rem] border-2 border-dashed p-6 text-center transition ${players.length > 0 && startReadyPlayerIds.length === players.length ? "border-[#16865c] bg-[#dff5e8]" : "border-[#e56b35]/45 bg-[#fff1e7]"}`}
             >
-              <HandGrab className="size-10 text-[#e56b35]" />
+              <TbHandStop className="size-12 text-[#e56b35]" />
               <strong className="mt-3 text-2xl">
                 Everyone hover here to start
               </strong>
@@ -1437,7 +1437,7 @@ function QuestionStage({
               data-answer-card={answer.id}
               className="flex min-h-16 cursor-none items-center rounded-2xl border border-black/8 bg-white px-4 py-3 text-lg font-black text-[#191b26] shadow-sm"
             >
-              <HandGrab className="mr-3 size-6 shrink-0 text-[#e56b35]" />
+              <TbHandGrab className="mr-3 size-7 shrink-0 text-[#e56b35]" />
               {answer.label}
             </div>
           ))}
@@ -1631,19 +1631,25 @@ function AirMouseCursors({
         style={{ willChange: "transform" }}
       >
         {held && (
-          <div className="absolute bottom-8 left-7 whitespace-nowrap rounded-xl bg-white px-4 py-3 text-lg font-bold text-[#191b26] shadow-2xl">
+          <div
+            className="absolute bottom-8 left-0 -translate-x-1/2 whitespace-nowrap rounded-xl border-2 bg-white px-4 py-3 text-lg font-bold text-[#191b26] shadow-2xl"
+            style={{ borderColor: player.color }}
+          >
             {held.label}
           </div>
         )}
-        <HandGrab
-          className="-translate-x-2 -translate-y-2 drop-shadow-lg"
-          fill={player.color}
-          size={38}
-          stroke="white"
-          strokeWidth={2.5}
-        />
         <span
-          className="keep-white absolute left-7 top-7 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-sm font-black text-white shadow-lg"
+          className="absolute -left-5 -top-5 flex size-10 items-center justify-center rounded-full bg-white shadow-lg"
+          style={{ color: player.color }}
+        >
+          {held ? (
+            <TbHandGrab className="size-9" aria-hidden="true" />
+          ) : (
+            <TbHandStop className="size-9" aria-hidden="true" />
+          )}
+        </span>
+        <span
+          className="keep-white absolute left-6 top-6 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-sm font-black text-white shadow-lg"
           style={{ backgroundColor: player.color || FALLBACK_COLOR }}
         >
           {player.name}
