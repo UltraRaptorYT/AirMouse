@@ -70,9 +70,52 @@ const MEMORISE_MS = 45_000;
 // Per-frame interpolation toward the latest aim. 1 = snap instantly, lower = smoother but laggier.
 const CURSOR_LERP = 0.6;
 const CURSOR_SNAP_PX = 0.5;
+const ANSWER_HIT_SLOP_PX = 18;
+const TARGET_HIT_SLOP_PX = 36;
 
 function applyCursorTransform(element: HTMLElement, position: CursorPosition) {
   element.style.transform = `translate3d(${position.x}px, ${position.y}px, 0)`;
+}
+
+function findCursorElement(
+  selector: string,
+  position: CursorPosition,
+  hitSlop = 0,
+) {
+  for (const element of document.elementsFromPoint(position.x, position.y)) {
+    const match = element.closest<HTMLElement>(selector);
+    if (match) return match;
+  }
+
+  if (hitSlop <= 0) return null;
+  let nearest: { element: HTMLElement; distance: number } | null = null;
+  for (const element of document.querySelectorAll<HTMLElement>(selector)) {
+    const box = element.getBoundingClientRect();
+    if (
+      box.width <= 0 ||
+      box.height <= 0 ||
+      position.x < box.left - hitSlop ||
+      position.x > box.right + hitSlop ||
+      position.y < box.top - hitSlop ||
+      position.y > box.bottom + hitSlop
+    ) {
+      continue;
+    }
+    // Compare the nearest edges, so a short card does not beat a closer long one.
+    const x = Math.max(box.left + 0.5, Math.min(box.right - 0.5, position.x));
+    const y = Math.max(box.top + 0.5, Math.min(box.bottom - 0.5, position.y));
+    // A card clipped by a scrolling panel must not be grabbable through it.
+    if (!document.elementsFromPoint(x, y).some((hit) => element.contains(hit))) {
+      continue;
+    }
+    const dx = position.x - x;
+    const dy = position.y - y;
+    const distance = dx * dx + dy * dy;
+    if (!nearest || distance < nearest.distance) {
+      nearest = { element, distance };
+    }
+  }
+  return nearest?.element ?? null;
 }
 
 function formatTime(milliseconds: number) {
@@ -458,16 +501,21 @@ export default function ScreenPage() {
       }
       if (message.type === "pointer-down") {
         const action: PointerActionPayload = message.payload;
-        const cursor = cursorsRef.current[action.playerId];
+        const cursor =
+          renderedCursorsRef.current[action.playerId] ?? cursorsRef.current[action.playerId];
         if (!cursor || gameStateRef.current.phase !== "question") return;
-        const element = document.elementFromPoint(cursor.x, cursor.y);
-        if (element?.closest("[data-hint-zone]")) {
+        if (draggingRef.current[action.playerId]) return;
+        // Resolve both together: a direct card hit takes priority over a nearby hint.
+        const element = findCursorElement(
+          "[data-answer-card], [data-hint-zone]",
+          cursor,
+          ANSWER_HIT_SLOP_PX,
+        );
+        if (element?.hasAttribute("data-hint-zone")) {
           applyHint(action.playerId);
           return;
         }
-        const answerId =
-          element?.closest<HTMLElement>("[data-answer-card]")?.dataset
-            .answerCard;
+        const answerId = element?.dataset.answerCard;
         if (
           !answerId ||
           Object.values(draggingRef.current).includes(answerId)
@@ -500,12 +548,15 @@ export default function ScreenPage() {
       if (message.type === "pointer-up") {
         const action: PointerActionPayload = message.payload;
         const answerId = draggingRef.current[action.playerId];
-        const cursor = cursorsRef.current[action.playerId];
+        const cursor =
+          renderedCursorsRef.current[action.playerId] ?? cursorsRef.current[action.playerId];
         const activeQuestion = getQuestion(gameStateRef.current.question?.id);
         if (!answerId || !cursor || !activeQuestion) return;
-        const targetId = document
-          .elementFromPoint(cursor.x, cursor.y)
-          ?.closest<HTMLElement>("[data-answer-target]")?.dataset.answerTarget;
+        const targetId = findCursorElement(
+          "[data-answer-target]",
+          cursor,
+          TARGET_HIT_SLOP_PX,
+        )?.dataset.answerTarget;
         const answer = activeQuestion.answers.find(
           (item) => item.id === answerId,
         );
@@ -1193,6 +1244,7 @@ export default function ScreenPage() {
       roomCode={roomCode}
       status={status}
       roomRemaining={roomRemaining}
+      lockViewport
     >
       <QuestionStage
         question={gameState.question}
@@ -1220,17 +1272,23 @@ function HostShell({
   roomCode,
   status,
   roomRemaining,
+  lockViewport = false,
   children,
 }: {
   roomCode: string;
   status: ConnectionStatus;
   roomRemaining: number;
+  lockViewport?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <main className="light-mode game-shell min-h-dvh bg-[#eef7f0] p-4 text-[#17211c] sm:p-6">
-      <div className="mx-auto flex min-h-[calc(100dvh-2rem)] max-w-[1600px] flex-col gap-5 sm:min-h-[calc(100dvh-3rem)]">
-        <header className="flex items-center justify-between px-1">
+    <main
+      className={`light-mode game-shell min-h-dvh bg-[#eef7f0] p-4 text-[#17211c] sm:p-6 ${lockViewport ? "lg:h-dvh lg:overflow-hidden" : ""}`}
+    >
+      <div
+        className={`mx-auto flex min-h-[calc(100dvh-2rem)] max-w-[1900px] flex-col gap-4 sm:min-h-[calc(100dvh-3rem)] ${lockViewport ? "lg:h-[calc(100dvh-3rem)]" : ""}`}
+      >
+        <header className="flex shrink-0 items-center justify-between px-1">
           <div className="flex items-center gap-3">
             <span className="keep-white flex size-11 items-center justify-center rounded-2xl bg-[#e56b35] text-white shadow-sm">
               <Gamepad2 className="size-6" />
@@ -1311,9 +1369,9 @@ function QuestionStage({
   const complete = correctCount === question.answers.length;
 
   return (
-    <div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[minmax(0,1fr)_390px]">
-      <section className="host-panel flex min-h-0 flex-col overflow-hidden p-6 sm:p-8">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_clamp(380px,36vw,620px)] lg:overflow-hidden">
+      <section className="host-panel flex min-h-0 min-w-0 flex-col overflow-auto p-5 sm:p-6">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-4">
           <div>
             <span className="eyebrow">
               {challengeLabel ?? "Fill the passage"}
@@ -1322,7 +1380,7 @@ function QuestionStage({
               {question.instruction}
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <div className="rounded-2xl bg-[#edf4ef] px-4 py-3">
               <p className="text-sm text-white/40">Time</p>
               <p className="font-mono text-3xl font-black">
@@ -1347,7 +1405,7 @@ function QuestionStage({
           </div>
         </div>
         {hint && (
-          <div className="mt-5 flex items-center gap-3 rounded-2xl border border-[#e56b35]/30 bg-[#fff1e7] px-5 py-4 text-lg">
+          <div className="mt-5 flex shrink-0 items-center gap-3 rounded-2xl border border-[#e56b35]/30 bg-[#fff1e7] px-5 py-4 text-lg">
             <Lightbulb className="size-6 shrink-0 text-[#e56b35]" />
             <p>
               <strong>{hint.answerLabel}</strong> goes in position{" "}
@@ -1359,7 +1417,7 @@ function QuestionStage({
           </div>
         )}
         <div
-          className={`mt-6 min-h-0 flex-1 overflow-auto text-balance font-semibold text-white/85 ${isChinese ? "text-3xl leading-[2.25] sm:text-4xl" : "text-xl leading-[2.25] sm:text-2xl lg:text-[1.75rem]"}`}
+          className={`mt-4 shrink-0 grow text-balance font-semibold text-white/85 ${isChinese ? "text-[clamp(1.4rem,1.8vw,2.2rem)] leading-[2.1]" : "text-[clamp(1.05rem,1.35vw,1.6rem)] leading-[2.05]"}`}
         >
           {tokens.map((token, index) => {
             const match = token.match(/^\[(\d+)\]$/);
@@ -1378,15 +1436,15 @@ function QuestionStage({
               <span
                 key={target.id}
                 data-answer-target={target.id}
-                className={`mx-1 inline-flex min-h-14 min-w-36 items-center justify-center rounded-xl border-2 px-2 py-1 align-middle text-center ${answer ? "border-transparent" : hinted ? "border-[#e56b35] bg-[#fff1e7] ring-4 ring-[#e56b35]/15" : "border-dashed border-white/25 bg-white/[.05]"}`}
+                className={`mx-1 inline-flex min-h-[clamp(2.5rem,4.5vh,3.5rem)] min-w-28 max-w-[calc(100%-0.5rem)] items-center justify-center rounded-xl border-2 px-2 py-1 align-middle text-center ${answer ? "border-transparent" : hinted ? "border-[#e56b35] bg-[#fff1e7] ring-4 ring-[#e56b35]/15" : "border-dashed border-white/25 bg-white/[.05]"}`}
               >
                 {answer ? (
                   <span
                     data-answer-card={answer.id}
-                    className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-lg font-black shadow-sm sm:text-xl ${placed?.correct ? "bg-[#dff5e8] text-[#087653]" : "bg-[#ffe0c2] text-[#9a3f17]"}`}
+                    className={`inline-flex min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-[length:inherit] font-black leading-snug shadow-sm ${placed?.correct ? "bg-[#dff5e8] text-[#087653]" : "bg-[#ffe0c2] text-[#9a3f17]"}`}
                   >
                     <span
-                      className="inline-block size-2.5 rounded-full"
+                      className="inline-block size-2.5 shrink-0 rounded-full"
                       style={{ backgroundColor: owner?.color ?? "#e56b35" }}
                     />
                     {answer.label}
@@ -1400,7 +1458,7 @@ function QuestionStage({
             );
           })}
         </div>
-        <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-white/10 pt-4">
+        <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2 border-t border-white/10 pt-3">
           {players.map((player) => (
             <span
               key={player.playerId}
@@ -1422,47 +1480,54 @@ function QuestionStage({
           </span>
         </div>
       </section>
-      <aside className="host-panel flex min-h-0 flex-col overflow-hidden p-6">
-        <div>
+      <aside className="host-panel flex min-h-0 min-w-0 flex-col overflow-auto p-5">
+        <div className="shrink-0">
           <span className="eyebrow">Phrase bank</span>
-          <h2 className="mt-3 text-3xl font-black">Choose a phrase</h2>
-          <p className="mt-2 text-base text-white/45">
+          <h2 className="mt-2 text-2xl font-black">Choose a phrase</h2>
+          <p className="mt-1 text-sm text-white/45">
             Grab a phrase, then release it over the matching position.
           </p>
         </div>
-        <div className="mt-5 min-h-0 flex-1 space-y-3 overflow-auto pr-1">
+        <div
+          data-hint-zone
+          className="mt-3 flex min-h-16 shrink-0 items-center gap-3 rounded-2xl border-2 border-dashed border-[#e56b35]/40 bg-[#fff1e7] px-4 py-3"
+        >
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-white text-[#e56b35] shadow-sm">
+            <Lightbulb className="size-6" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <strong className="block text-lg">Show a position</strong>
+            <span className="block text-sm text-white/45">
+              Aim here and tap Grab
+            </span>
+          </span>
+          <span className="shrink-0 rounded-lg bg-white px-3 py-2 text-sm font-black text-[#a44a22]">
+            +25s
+          </span>
+        </div>
+        <div className="mt-3 grid shrink-0 grow grid-cols-2 content-start gap-2 xl:grid-cols-3">
           {poolAnswers.map((answer) => (
             <div
               key={answer.id}
               data-answer-card={answer.id}
-              className="flex min-h-16 cursor-none items-center rounded-2xl border border-black/8 bg-white px-4 py-3 text-lg font-black text-[#191b26] shadow-sm"
+              className="flex min-h-12 cursor-none items-center rounded-xl border border-black/8 bg-white px-3 py-2 text-[clamp(.8rem,1vw,1rem)] font-black leading-tight text-[#191b26] shadow-sm"
             >
-              <TbHandGrab className="mr-3 size-7 shrink-0 text-[#e56b35]" />
+              <TbHandGrab className="mr-2 size-6 shrink-0 text-[#e56b35]" />
               {answer.label}
             </div>
           ))}
           {complete && (
-            <div className="rounded-2xl bg-[#dff5e8] p-5 text-lg font-bold text-[#087653]">
+            <div className="col-span-full rounded-2xl bg-[#dff5e8] p-5 text-lg font-bold text-[#087653]">
               <Check className="mr-2 inline size-6" />
               Passage complete
             </div>
           )}
           {!complete && poolAnswers.length === 0 && (
-            <p className="rounded-2xl bg-[#fff1e7] p-4 text-base font-semibold text-[#9a3f17]">
+            <p className="col-span-full rounded-2xl bg-[#fff1e7] p-4 text-base font-semibold text-[#9a3f17]">
               Every phrase is placed. Move the orange ones to a different
               position.
             </p>
           )}
-        </div>
-        <div
-          data-hint-zone
-          className="mt-5 flex min-h-28 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[#e56b35]/40 bg-[#fff1e7] p-4 text-center"
-        >
-          <Lightbulb className="size-7 text-[#e56b35]" />
-          <strong className="mt-2 text-xl">Show a position</strong>
-          <span className="mt-1 text-sm text-white/45">
-            Aim here and tap Grab (+25s)
-          </span>
         </div>
       </aside>
     </div>
