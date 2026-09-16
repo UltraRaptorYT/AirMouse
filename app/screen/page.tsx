@@ -45,6 +45,7 @@ import type {
   PointerActionPayload,
   ServerRoomMessage,
 } from "@/lib/realtime/types";
+import { cn } from "@/lib/utils";
 
 type ConnectionStatus = "connecting" | "ready" | "reconnecting" | "error";
 type ScoreEntry = { name: string; score: number };
@@ -105,7 +106,9 @@ function findCursorElement(
     const x = Math.max(box.left + 0.5, Math.min(box.right - 0.5, position.x));
     const y = Math.max(box.top + 0.5, Math.min(box.bottom - 0.5, position.y));
     // A card clipped by a scrolling panel must not be grabbable through it.
-    if (!document.elementsFromPoint(x, y).some((hit) => element.contains(hit))) {
+    if (
+      !document.elementsFromPoint(x, y).some((hit) => element.contains(hit))
+    ) {
       continue;
     }
     const dx = position.x - x;
@@ -502,7 +505,8 @@ export default function ScreenPage() {
       if (message.type === "pointer-down") {
         const action: PointerActionPayload = message.payload;
         const cursor =
-          renderedCursorsRef.current[action.playerId] ?? cursorsRef.current[action.playerId];
+          renderedCursorsRef.current[action.playerId] ??
+          cursorsRef.current[action.playerId];
         if (!cursor || gameStateRef.current.phase !== "question") return;
         if (draggingRef.current[action.playerId]) return;
         // Resolve both together: a direct card hit takes priority over a nearby hint.
@@ -549,7 +553,8 @@ export default function ScreenPage() {
         const action: PointerActionPayload = message.payload;
         const answerId = draggingRef.current[action.playerId];
         const cursor =
-          renderedCursorsRef.current[action.playerId] ?? cursorsRef.current[action.playerId];
+          renderedCursorsRef.current[action.playerId] ??
+          cursorsRef.current[action.playerId];
         const activeQuestion = getQuestion(gameStateRef.current.question?.id);
         if (!answerId || !cursor || !activeQuestion) return;
         const targetId = findCursorElement(
@@ -1697,14 +1702,17 @@ function AirMouseCursors({
       >
         {held && (
           <div
-            className="absolute bottom-8 left-0 -translate-x-1/2 whitespace-nowrap rounded-xl border-2 bg-white px-4 py-3 text-lg font-bold text-[#191b26] shadow-2xl"
+            className="absolute -bottom-8 left-0 -translate-x-1/2 whitespace-nowrap rounded-xl border-2 bg-white px-4 py-3 text-lg font-bold text-[#191b26] shadow-2xl"
             style={{ borderColor: player.color }}
           >
             {held.label}
           </div>
         )}
         <span
-          className="absolute -left-5 -top-5 flex size-10 items-center justify-center rounded-full bg-white shadow-lg"
+          className={cn(
+            "absolute -left-5 -top-5 flex size-10 items-center justify-center rounded-full bg-white shadow-lg",
+            held ? "opacity-75" : "opacity-100",
+          )}
           style={{ color: player.color }}
         >
           {held ? (
