@@ -74,6 +74,7 @@ export type LeaderboardEntry = {
   timeMs: number;
   penaltyMs: number;
   completedAt: number;
+  hasPhoto?: boolean;
 };
 
 export type LeaderboardPayload = {
@@ -94,6 +95,7 @@ export type ClientRoomMessage =
   | { type: "drop-result"; payload: DropResultPayload }
   | { type: "round-complete"; payload: { questionId: string } }
   | { type: "submit-result"; payload: LeaderboardEntry }
+  | { type: "submit-team-photo"; payload: { runId: string; photo: string } }
   | { type: "request-leaderboard" }
   | { type: "ping" };
 
@@ -109,5 +111,6 @@ export type ServerRoomMessage =
   | { type: "drop-result"; payload: DropResultPayload }
   | { type: "round-complete"; payload: { questionId: string } }
   | { type: "leaderboard"; payload: LeaderboardPayload }
+  | { type: "team-photo-result"; payload: { runId: string; error?: string } }
   | { type: "pong" }
   | { type: "error"; message: string };

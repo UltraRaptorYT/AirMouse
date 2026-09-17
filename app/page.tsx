@@ -14,6 +14,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { HomeTopTeams } from "@/components/top-teams";
 
 export default function HomePage() {
   const router = useRouter();
@@ -149,6 +150,7 @@ export default function HomePage() {
             </div>
           </section>
         </div>
+        <HomeTopTeams />
       </div>
     </main>
   );

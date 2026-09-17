@@ -8,6 +8,7 @@ import type {
   ServerRoomMessage,
 } from "../lib/realtime/types";
 import { colorForPlayer, PLAYER_COLORS } from "../lib/realtime/colors";
+import { MAX_TEAM_PHOTO_LENGTH } from "../lib/realtime/leaderboard";
 
 type SocketAttachment = {
   role: "host" | "player";
@@ -138,7 +139,7 @@ export class Leaderboard extends DurableObject<Env> {
     return (await this.ctx.storage.get<LeaderboardEntry[]>("entries")) ?? [];
   }
 
-  async submit(entry: LeaderboardEntry): Promise<LeaderboardEntry[]> {
+  async submit(entry: LeaderboardEntry, ownerId: string): Promise<LeaderboardEntry[]> {
     const entries = await this.list();
     if (entries.some((existing) => existing.id === entry.id)) return entries;
 
@@ -157,8 +158,47 @@ export class Leaderboard extends DurableObject<Env> {
       )
       .sort((a, b) => a.timeMs - b.timeMs || a.completedAt - b.completedAt);
 
-    await this.ctx.storage.put("entries", next);
+    await this.ctx.storage.transaction(async (txn) => {
+      await txn.put({ entries: next, [`owner:${entry.id}`]: ownerId });
+      for (const removed of [...entries, entry].filter(
+        (item) => !next.some((kept) => kept.id === item.id),
+      )) {
+        await txn.delete([`photo:${removed.id}`, `owner:${removed.id}`]);
+      }
+    });
     return next;
+  }
+
+  async savePhoto(runId: string, photo: string, ownerId: string): Promise<string | null> {
+    if (
+      typeof photo !== "string" || photo.length > MAX_TEAM_PHOTO_LENGTH ||
+      !/^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/]*={0,2}$/.test(photo)
+    ) return "Please take a new photo and try again.";
+    try {
+      const bytes = atob(photo.slice("data:image/jpeg;base64,".length));
+      if (!bytes.endsWith("\xff\xd9")) return "Please take a new photo and try again.";
+    } catch {
+      return "Please take a new photo and try again.";
+    }
+
+    return this.ctx.storage.transaction(async (txn) => {
+      const entries = (await txn.get<LeaderboardEntry[]>("entries")) ?? [];
+      const entry = entries.find((item) => item.id === runId);
+      if (!entry || await txn.get<string>(`owner:${runId}`) !== ownerId)
+        return "This photo does not belong to this room's result.";
+      const rank = entries.filter((item) => item.challengeId === entry.challengeId)
+        .findIndex((item) => item.id === runId);
+      if (rank < 0 || rank > 2) return "Your team is no longer in the top three.";
+      // One confirmed photo per run makes retries safe and image URLs stable.
+      if (entry.hasPhoto) return null;
+      entry.hasPhoto = true;
+      await txn.put({ entries, [`photo:${runId}`]: photo });
+      return null;
+    });
+  }
+
+  async photo(runId: string): Promise<string | undefined> {
+    return this.ctx.storage.get<string>(`photo:${runId}`);
   }
 }
 
@@ -213,7 +253,7 @@ export class Room extends DurableObject<Env> {
   async webSocketMessage(socket: WebSocket, rawMessage: string | ArrayBuffer) {
     // Cursor packets arrive ~60x/sec per player; keep this hot path allocation-free.
     // A JS string's UTF-16 length is a lower bound on its UTF-8 byte length, so this is a safe cap.
-    if (typeof rawMessage !== "string" || rawMessage.length > MAX_MESSAGE_BYTES) {
+    if (typeof rawMessage !== "string" || rawMessage.length > MAX_TEAM_PHOTO_LENGTH + MAX_MESSAGE_BYTES) {
       this.send(socket, { type: "error", message: "Invalid message" });
       return;
     }
@@ -227,6 +267,11 @@ export class Room extends DurableObject<Env> {
     }
 
     const attachment = socket.deserializeAttachment() as SocketAttachment;
+    if (rawMessage.length > MAX_MESSAGE_BYTES &&
+      (attachment.role !== "host" || message.type !== "submit-team-photo")) {
+      this.send(socket, { type: "error", message: "Invalid message" });
+      return;
+    }
 
     if (attachment.role === "player") {
       await this.handlePlayerMessage(socket, attachment, message);
@@ -351,8 +396,25 @@ export class Room extends DurableObject<Env> {
         this.sendToHosts({ type: "error", message: "Invalid leaderboard entry" });
         return;
       }
-      const entries = await this.leaderboard().submit(entry);
+      const entries = await this.leaderboard().submit(entry, this.ctx.id.toString());
       this.sendToHosts({ type: "leaderboard", payload: { entries } });
+      return;
+    }
+
+    if (message.type === "submit-team-photo") {
+      const { runId, photo } = message.payload ?? {};
+      if (typeof runId !== "string" || runId.length > 64) return;
+      try {
+        const error = await this.leaderboard().savePhoto(runId, photo, this.ctx.id.toString());
+        this.sendToHosts({ type: "team-photo-result", payload: { runId, error: error ?? undefined } });
+        if (!error) {
+          const entries = await this.leaderboard().list();
+          this.sendToHosts({ type: "leaderboard", payload: { entries } });
+        }
+      } catch (error) {
+        console.error("Team photo save failed", error);
+        this.sendToHosts({ type: "team-photo-result", payload: { runId, error: "Could not save your photo. Please retry." } });
+      }
     }
   }
 
@@ -445,7 +507,22 @@ export default {
 
     if (url.pathname === "/leaderboard" && request.method === "GET") {
       const leaderboard = env.LEADERBOARD.getByName(LEADERBOARD_ID);
-      return jsonResponse({ entries: await leaderboard.list() });
+      const response = jsonResponse({ entries: await leaderboard.list() });
+      // The leaderboard is public; allow the home page to read it across origins.
+      response.headers.set("access-control-allow-origin", "*");
+      return response;
+    }
+
+    const photoMatch = url.pathname.match(/^\/leaderboard\/photos\/([A-Za-z0-9-]{1,64})$/);
+    if (photoMatch && request.method === "GET") {
+      const photo = await env.LEADERBOARD.getByName(LEADERBOARD_ID).photo(photoMatch[1]);
+      if (!photo) return jsonResponse({ error: "Photo not found" }, 404);
+      const bytes = Uint8Array.from(atob(photo.split(",")[1]), (character) => character.charCodeAt(0));
+      return new Response(bytes, { headers: {
+        "content-type": "image/jpeg",
+        "cache-control": "public, max-age=3600",
+        "x-content-type-options": "nosniff",
+      } });
     }
 
     const match = url.pathname.match(/^\/rooms\/([^/]+)$/);

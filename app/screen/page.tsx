@@ -20,8 +20,10 @@ import {
   WifiOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { TeamCamera, type PhotoSaveState } from "@/components/team-camera";
+import { TeamPhoto, TopTeams } from "@/components/top-teams";
+import { rankTeams } from "@/lib/realtime/leaderboard";
 import {
-  challenges,
   getChallenge,
   getQuestion,
   toPublicQuestion,
@@ -153,6 +155,8 @@ export default function ScreenPage() {
   const [startProgress, setStartProgress] = useState(0);
   const [hint, setHint] = useState<HintState>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [photoSaveState, setPhotoSaveState] = useState<PhotoSaveState>({ status: "idle" });
+  const photoRunRef = useRef<string | null>(null);
   // The id of the run this host submitted for the current finish, so we can highlight it and never double-submit.
   const [submittedRunId, setSubmittedRunId] = useState<string | null>(null);
   const [gameState, setGameState] = useState<GameStatePayload>({
@@ -263,6 +267,8 @@ export default function ScreenPage() {
     setStartProgress(0);
     startReadyAtRef.current = null;
     setSubmittedRunId(null);
+    photoRunRef.current = null;
+    setPhotoSaveState({ status: "idle" });
     const lobby: GameStatePayload = {
       phase: "lobby",
       questionIndex: 0,
@@ -429,14 +435,14 @@ export default function ScreenPage() {
       return Object.values(solved).filter((entry) => entry.correct).length;
     }
 
-    function applyHint(playerId: string) {
+    function applyHint(playerId: string, answerId: string) {
       const state = gameStateRef.current;
       const activeQuestion = getQuestion(state.question?.id);
-      if (!activeQuestion) return;
+      if (state.phase !== "question" || !activeQuestion) return;
       const answer = activeQuestion.answers.find(
-        (item) => !solvedAnswersRef.current[item.id]?.correct,
+        (item) => item.id === answerId,
       );
-      if (!answer) return;
+      if (!answer || solvedAnswersRef.current[answerId]?.correct) return;
       const target = activeQuestion.targets.find(
         (item) => item.id === answer.targetId,
       );
@@ -459,6 +465,14 @@ export default function ScreenPage() {
       }
       if (message.type === "leaderboard") {
         setLeaderboard(message.payload.entries);
+        return;
+      }
+      if (message.type === "team-photo-result") {
+        if (message.payload.runId === photoRunRef.current) {
+          setPhotoSaveState(message.payload.error
+            ? { status: "error", error: message.payload.error }
+            : { status: "saved" });
+        }
         return;
       }
       if (message.type === "cursor-move") {
@@ -509,16 +523,11 @@ export default function ScreenPage() {
           cursorsRef.current[action.playerId];
         if (!cursor || gameStateRef.current.phase !== "question") return;
         if (draggingRef.current[action.playerId]) return;
-        // Resolve both together: a direct card hit takes priority over a nearby hint.
         const element = findCursorElement(
-          "[data-answer-card], [data-hint-zone]",
+          "[data-answer-card]",
           cursor,
           ANSWER_HIT_SLOP_PX,
         );
-        if (element?.hasAttribute("data-hint-zone")) {
-          applyHint(action.playerId);
-          return;
-        }
         const answerId = element?.dataset.answerCard;
         if (
           !answerId ||
@@ -556,12 +565,16 @@ export default function ScreenPage() {
           renderedCursorsRef.current[action.playerId] ??
           cursorsRef.current[action.playerId];
         const activeQuestion = getQuestion(gameStateRef.current.question?.id);
-        if (!answerId || !cursor || !activeQuestion) return;
-        const targetId = findCursorElement(
+        if (!answerId || !cursor || !activeQuestion || gameStateRef.current.phase !== "question") return;
+        const dropZone = findCursorElement(
+          "[data-answer-target], [data-hint-zone]",
+          cursor,
+        ) ?? findCursorElement(
           "[data-answer-target]",
           cursor,
           TARGET_HIT_SLOP_PX,
-        )?.dataset.answerTarget;
+        );
+        const targetId = dropZone?.dataset.answerTarget;
         const answer = activeQuestion.answers.find(
           (item) => item.id === answerId,
         );
@@ -573,6 +586,11 @@ export default function ScreenPage() {
         delete nextDragging[action.playerId];
         draggingRef.current = nextDragging;
         setDragging(nextDragging);
+
+        if (dropZone?.hasAttribute("data-hint-zone")) {
+          applyHint(action.playerId, answerId);
+          return;
+        }
 
         // Released outside any slot: card goes back to the pool, nothing else happens.
         if (!targetId || !answer) {
@@ -906,12 +924,31 @@ export default function ScreenPage() {
       : undefined;
   const challengeLeaderboard = useMemo(
     () =>
-      leaderboard.filter((entry) => entry.challengeId === currentChallengeId),
+      rankTeams(leaderboard.filter((entry) => entry.challengeId === currentChallengeId)),
     [currentChallengeId, leaderboard],
   );
   const submittedRank = submittedRunId
     ? challengeLeaderboard.findIndex((entry) => entry.id === submittedRunId) + 1
     : 0;
+
+  useEffect(() => {
+    if (photoSaveState.status !== "saving") return;
+    const timer = window.setTimeout(() => setPhotoSaveState({
+      status: "error", error: "Photo saving timed out. Please retry.",
+    }), 15_000);
+    return () => window.clearTimeout(timer);
+  }, [photoSaveState.status]);
+
+  function saveTeamPhoto(photo: string) {
+    if (!submittedRunId || submittedRank < 1 || submittedRank > 3) return;
+    photoRunRef.current = submittedRunId;
+    const sent = socketRef.current?.send({
+      type: "submit-team-photo", payload: { runId: submittedRunId, photo },
+    });
+    setPhotoSaveState(sent ? { status: "saving" } : {
+      status: "error", error: "Connection lost. Please reconnect and try again.",
+    });
+  }
 
   if (gameState.phase === "lobby") {
     return (
@@ -1016,7 +1053,7 @@ export default function ScreenPage() {
             </div>
           </section>
         </div>
-        <GlobalLeaderboard entries={leaderboard} />
+        <TopTeams entries={leaderboard} />
         <CalibrationDot />
         <AirMouseCursors
           players={players}
@@ -1193,6 +1230,10 @@ export default function ScreenPage() {
                 <LoaderCircle className="size-4 animate-spin" />
                 Saving your time…
               </p>
+            )}
+            {submittedRank >= 1 && submittedRank <= 3 && (
+              <TeamCamera key={submittedRunId} rank={submittedRank}
+                saveState={photoSaveState} onSave={saveTeamPhoto} />
             )}
             <div className="mt-8 w-full max-w-2xl space-y-2">
               {rankedPlayers.map((player, index) => (
@@ -1410,7 +1451,7 @@ function QuestionStage({
           </div>
         </div>
         {hint && (
-          <div className="mt-5 flex shrink-0 items-center gap-3 rounded-2xl border border-[#e56b35]/30 bg-[#fff1e7] px-5 py-4 text-lg">
+          <div role="status" className="mt-5 flex shrink-0 items-center gap-3 rounded-2xl border border-[#e56b35]/30 bg-[#fff1e7] px-5 py-4 text-lg">
             <Lightbulb className="size-6 shrink-0 text-[#e56b35]" />
             <p>
               <strong>{hint.answerLabel}</strong> goes in position{" "}
@@ -1441,7 +1482,7 @@ function QuestionStage({
               <span
                 key={target.id}
                 data-answer-target={target.id}
-                className={`mx-1 inline-flex min-h-[clamp(2.5rem,4.5vh,3.5rem)] min-w-28 max-w-[calc(100%-0.5rem)] items-center justify-center rounded-xl border-2 px-2 py-1 align-middle text-center ${answer ? "border-transparent" : hinted ? "border-[#e56b35] bg-[#fff1e7] ring-4 ring-[#e56b35]/15" : "border-dashed border-white/25 bg-white/[.05]"}`}
+                className={`mx-1 inline-flex min-h-[clamp(2.5rem,4.5vh,3.5rem)] min-w-28 max-w-[calc(100%-0.5rem)] items-center justify-center rounded-xl border-2 px-2 py-1 align-middle text-center ${hinted ? "border-[#e56b35] bg-[#fff1e7] ring-4 ring-[#e56b35]/15" : answer ? "border-transparent" : "border-dashed border-white/25 bg-white/[.05]"}`}
               >
                 {answer ? (
                   <span
@@ -1501,9 +1542,9 @@ function QuestionStage({
             <Lightbulb className="size-6" />
           </span>
           <span className="min-w-0 flex-1">
-            <strong className="block text-lg">Show a position</strong>
+            <strong className="block text-lg">Show position</strong>
             <span className="block text-sm text-white/45">
-              Aim here and tap Grab
+              Drop a phrase here to reveal its position
             </span>
           </span>
           <span className="shrink-0 rounded-lg bg-white px-3 py-2 text-sm font-black text-[#a44a22]">
@@ -1594,6 +1635,7 @@ function LeaderboardList({
             >
               {index + 1}
             </span>
+            {index < 3 && <TeamPhoto entry={entry} />}
             <span className="min-w-0 flex-1">
               <span
                 className={`block truncate font-bold ${compact ? "text-sm" : ""}`}
@@ -1623,45 +1665,6 @@ function LeaderboardList({
         );
       })}
     </ol>
-  );
-}
-
-function GlobalLeaderboard({ entries }: { entries: LeaderboardEntry[] }) {
-  return (
-    <section className="host-panel flex flex-col p-6">
-      <div className="flex items-center justify-between">
-        <h2 className="flex items-center gap-2 text-2xl font-bold">
-          <Timer className="size-5 text-[#ffd166]" />
-          Fastest teams of all time
-        </h2>
-        <span className="text-xs font-bold uppercase tracking-[.18em] text-white/35">
-          Global · all rooms
-        </span>
-      </div>
-      <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {challenges.map((challenge) => (
-          <div
-            key={challenge.id}
-            className="min-w-0 rounded-2xl bg-white/[.03] p-4"
-          >
-            <div className="flex items-baseline justify-between gap-2">
-              <h3 className="truncate font-black">{challenge.label}</h3>
-              <span className="shrink-0 text-[11px] text-white/35">
-                {challenge.source}
-              </span>
-            </div>
-            <LeaderboardList
-              entries={entries.filter(
-                (entry) => entry.challengeId === challenge.id,
-              )}
-              limit={5}
-              compact
-              className="mt-3"
-            />
-          </div>
-        ))}
-      </div>
-    </section>
   );
 }
 
