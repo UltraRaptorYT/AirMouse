@@ -197,7 +197,7 @@ export function TeamCamera({ rank, saveState, onSave, autoStart = false, autoSav
             <span className="text-sm font-bold">Your camera preview will appear here</span>
           </div>
         ) : (
-          <div role="status" aria-live="assertive" aria-atomic="true" className="keep-white pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/20 text-white">
+          <div role="status" aria-live="assertive" aria-atomic="true" className="camera-countdown-overlay keep-white pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/20 text-white">
             {countdown !== null ? (
               <>
                 <strong className="text-7xl font-black drop-shadow-lg sm:text-8xl">{countdown}</strong>

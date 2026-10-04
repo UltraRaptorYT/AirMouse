@@ -1082,7 +1082,11 @@ export default function ScreenPage() {
     const choices = languageStep
       ? [
           { value: "en", title: "English", subtitle: "English questions" },
-          { value: "zh", title: "中文", subtitle: "中文题目" },
+          {
+            value: "zh",
+            title: "中文",
+            subtitle: "中文题目 / Mandarin Chinese",
+          },
         ]
       : [
           {
@@ -1111,14 +1115,25 @@ export default function ScreenPage() {
         <section className="host-panel flex flex-1 flex-col p-7 sm:p-10">
           <div className="text-center">
             <span className="eyebrow">
-              {languageStep ? "Step 1 of 2" : "Step 2 of 2"}
+              {languageStep
+                ? "Step 1 of 2 · 第一步，共两步"
+                : gameState.language === "zh"
+                  ? "第二步，共两步"
+                  : "Step 2 of 2"}
             </span>
             <h1 className="mt-4 text-4xl font-black tracking-[-.04em] sm:text-6xl">
-              {languageStep ? "Choose a language" : "Choose a challenge"}
+              {languageStep
+                ? "Choose a language · 选择语言"
+                : gameState.language === "zh"
+                  ? "选择挑战"
+                  : "Choose a challenge"}
             </h1>
             <p className="mt-3 text-lg text-white/50">
-              Move a cursor into a zone and keep it there for 5 seconds to
-              confirm.
+              {languageStep
+                ? "Move a cursor into a zone and hold for 5 seconds to confirm. / 将光标移入选项区域并停留 5 秒，即可确认。"
+                : gameState.language === "zh"
+                  ? "将光标移入选项区域并停留 5 秒，即可确认。"
+                  : "Move a cursor into a zone and keep it there for 5 seconds to confirm."}
             </p>
           </div>
           <div className="mt-8 grid flex-1 gap-6 md:grid-cols-2">
@@ -1149,7 +1164,9 @@ export default function ScreenPage() {
                   </div>
                   {active && (
                     <span className="mt-5 font-mono text-sm font-bold text-[#44d79b]">
-                      Hold {Math.max(1, Math.ceil(5 - dwell.progress * 5))}s
+                      {gameState.language === "zh" ? "保持 " : "Hold "}
+                      {Math.max(1, Math.ceil(5 - dwell.progress * 5))}
+                      {gameState.language === "zh" ? " 秒" : "s"}
                     </span>
                   )}
                 </div>
@@ -1183,7 +1200,9 @@ export default function ScreenPage() {
             </span>
           </div>
           <h1 className="mt-6 text-4xl font-black tracking-[-.04em] sm:text-6xl">
-            Read, recite and memorise
+            {gameState.language === "zh"
+              ? "阅读、背诵并记忆"
+              : "Read, recite and memorise"}
           </h1>
           <p
             className={`mt-8 max-w-6xl text-balance font-semibold leading-[1.75] text-white/80 ${gameState.language === "zh" ? "text-5xl" : "text-xl sm:text-3xl"}`}
@@ -1191,7 +1210,9 @@ export default function ScreenPage() {
             {gameState.memoriseText}
           </p>
           <p className="mt-8 text-sm font-bold uppercase tracking-[.18em] text-white/35">
-            Questions begin automatically when time is up
+            {gameState.language === "zh"
+              ? "时间结束后将自动开始答题"
+              : "Questions begin automatically when time is up"}
           </p>
           <AirMouseCursors
             players={players}
@@ -1485,7 +1506,7 @@ function QuestionStage({
           </div>
         )}
         <div
-          className={`mt-4 shrink-0 grow text-balance font-semibold text-white/85 ${isChinese ? "text-[clamp(1.4rem,1.8vw,2.2rem)] leading-[2.1]" : "text-[clamp(1.05rem,1.35vw,1.6rem)] leading-[2.05]"}`}
+          className={`mt-4 shrink-0 grow text-balance font-semibold text-white/85 ${isChinese ? "text-[clamp(1.4rem,1.8vw,2.2rem)] leading-[2.1]" : "text-2xl leading-[2.05]"}`} // text-[clamp(1.05rem,1.35vw,1.6rem)]
         >
           {tokens.map((token, index) => {
             const match = token.match(/^\[(\d+)\]$/);

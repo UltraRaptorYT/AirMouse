@@ -110,6 +110,57 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   const currentQuestionIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
+    if (!("wakeLock" in navigator)) return;
+
+    let wakeLock: WakeLockSentinel | null = null;
+    let requesting = false;
+    let disposed = false;
+
+    async function keepScreenAwake() {
+      if (
+        disposed ||
+        requesting ||
+        wakeLock ||
+        document.visibilityState !== "visible"
+      ) {
+        return;
+      }
+
+      requesting = true;
+      try {
+        const lock = await navigator.wakeLock.request("screen");
+        if (disposed || document.visibilityState !== "visible") {
+          await lock.release();
+        } else {
+          wakeLock = lock;
+        }
+      } catch {
+        // Wake locks may be unavailable in unsupported browsers or low-power mode.
+      } finally {
+        requesting = false;
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        void keepScreenAwake();
+      } else if (wakeLock) {
+        void wakeLock.release();
+        wakeLock = null;
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    void keepScreenAwake();
+
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (wakeLock) void wakeLock.release();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!roomCode) return;
 
     const id = makePlayerId(roomCode);
@@ -629,14 +680,21 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     gameState.phase === "memorise"
   ) {
     const isMemorising = gameState.phase === "memorise";
+    const isChinese = gameState.language === "zh";
     const title = isMemorising
-      ? "Memorise together"
+      ? isChinese ? "一起阅读、背诵并记忆" : "Memorise together"
       : gameState.phase === "language"
-        ? "Choose the language"
-        : "Choose the challenge";
+        ? "Choose the language / 选择语言"
+        : isChinese ? "选择挑战" : "Choose the challenge";
     const description = isMemorising
-      ? "Read or recite the passage on the shared screen. The questions begin automatically after 45 seconds."
-      : "Steer your colored cursor into a choice zone on the shared screen and keep it there for 5 seconds.";
+      ? isChinese
+        ? "请阅读或背诵共享屏幕上的经文。45 秒后将自动开始答题。"
+        : "Read or recite the passage on the shared screen. The questions begin automatically after 45 seconds."
+      : gameState.phase === "language"
+        ? "Steer your cursor into a choice zone and hold for 5 seconds. / 将光标移入选项区域并停留 5 秒。"
+        : isChinese
+          ? "将你的彩色光标移入共享屏幕上的选项区域，并停留 5 秒。"
+          : "Steer your colored cursor into a choice zone on the shared screen and keep it there for 5 seconds.";
 
     return (
       <PhoneShell roomCode={roomCode} status={status} score={totalScore}>
@@ -651,7 +709,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
             )}
           </div>
           <span className="player-eyebrow mt-7">
-            {gameState.challengeLabel ?? "Team selection"}
+            {gameState.challengeLabel ?? (isChinese ? "队伍选择" : "Team selection")}
           </span>
           <h1 className="mt-3 text-4xl font-black tracking-[-.04em]">
             {title}
@@ -667,7 +725,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
               onClick={recenter}
             >
               <Crosshair className="mr-1 size-5 text-[#15a97b]" />
-              Recenter cursor
+              {isChinese ? "重新校准光标" : "Recenter cursor"}
             </Button>
           )}
 
