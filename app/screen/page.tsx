@@ -1010,13 +1010,19 @@ export default function ScreenPage() {
               )}
             </div>
             <div>
-              <span className="eyebrow">Join the open room</span>
+              <span className="eyebrow">Join the open room · 加入开放房间</span>
               <h1 className="mt-5 text-balance text-4xl font-black leading-[.95] tracking-[-.04em] sm:text-6xl">
                 Scan. Aim. Complete the teaching.
+                <span className="mt-2 block text-3xl leading-tight tracking-[-.03em] sm:text-4xl" lang="zh-Hans">
+                  扫描、瞄准，完成经文。
+                </span>
               </h1>
               <p className="mt-5 max-w-xl text-xl leading-relaxed text-white/55">
                 Everyone joins, then moves their hand cursor into the start zone
                 together.
+              </p>
+              <p className="mt-2 max-w-xl text-lg leading-relaxed text-white/55" lang="zh-Hans">
+                所有人加入后，一起将手势光标移到开始区域。
               </p>
               <div className="mt-7 inline-flex items-center gap-4 rounded-2xl border border-white/10 bg-black/20 px-5 py-4">
                 <div className="flex items-center gap-3">
@@ -1028,10 +1034,10 @@ export default function ScreenPage() {
                   )}
                   <span className="hidden items-center gap-1.5 text-sm text-white/40 sm:flex">
                     <Clock3 className="size-4" />
-                    code {formatTime(roomRemaining)}
+                    code {formatTime(roomRemaining)} · 剩余时间
                   </span>
                 </div>
-                <span className="text-base text-white/45">Room code</span>
+                <span className="text-base text-white/45">Room code · 房间代码</span>
                 <strong className="font-mono text-2xl tracking-[.22em]">
                   {roomCode || "------"}
                 </strong>
@@ -1042,15 +1048,15 @@ export default function ScreenPage() {
             <div className="flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-2xl font-bold">
                 <Users className="size-6 text-[#e56b35]" />
-                {players.length} {players.length === 1 ? "player" : "players"}
+                {players.length} {players.length === 1 ? "player" : "players"} · {players.length} 位玩家
               </h2>
-              <span className="status-pill">Open</span>
+              <span className="status-pill">Open · 开放中</span>
             </div>
             <div className="mt-5 space-y-2">
               {players.length === 0 ? (
                 <div className="flex min-h-28 flex-col items-center justify-center rounded-2xl border border-dashed border-white/15 text-center text-white/35">
                   <Smartphone className="mb-3 size-8" />
-                  <p className="text-lg font-semibold">Waiting for players</p>
+                  <p className="text-lg font-semibold">Waiting for players · 等待玩家加入</p>
                 </div>
               ) : (
                 players.map((player) => {
@@ -1072,7 +1078,7 @@ export default function ScreenPage() {
                       <span
                         className={`text-sm font-bold ${ready ? "text-[#087653]" : "text-white/35"}`}
                       >
-                        {ready ? "In zone" : "Move to zone"}
+                        {ready ? "In zone · 已就位" : "Move to zone · 移入开始区"}
                       </span>
                     </div>
                   );
@@ -1087,10 +1093,13 @@ export default function ScreenPage() {
               <strong className="mt-3 text-2xl">
                 Everyone hover here to start
               </strong>
+              <span className="mt-1 text-xl font-bold" lang="zh-Hans">
+                所有人将光标移到这里即可开始
+              </span>
               <span className="mt-2 text-base text-white/45">
                 {players.length
-                  ? `${startReadyPlayerIds.length} of ${players.length} ready`
-                  : "Waiting for the team"}
+                  ? `${startReadyPlayerIds.length} of ${players.length} ready · ${players.length} 人中 ${startReadyPlayerIds.length} 人已就绪`
+                  : "Waiting for the team · 等待队伍加入"}
               </span>
               <div className="absolute inset-x-0 bottom-0 h-3 bg-black/5">
                 <div
@@ -1497,7 +1506,7 @@ function QuestionStage({
             <span className="eyebrow">
               {challengeLabel ?? "Fill the passage"}
             </span>
-            <p className="mt-3 text-xl font-semibold text-[#c65324]">
+            <p className="mt-3 text-2xl font-semibold text-[#17211c]">
               {question.instruction}
             </p>
           </div>
@@ -1541,7 +1550,7 @@ function QuestionStage({
           </div>
         )}
         <div
-          className={`mt-4 shrink-0 grow text-balance font-semibold leading-[1.8] text-white/90 ${isChinese ? "text-[clamp(1.9rem,2.8vw,3.1rem)]" : "text-[clamp(1.8rem,2.6vw,3rem)]"}`}
+          className={`mt-4 shrink-0 grow text-balance font-semibold leading-[1.7] text-[#17211c] ${isChinese ? "text-[clamp(2.4rem,3.5vw,4rem)]" : "text-[clamp(1.8rem,2.6vw,3rem)]"}`}
         >
           {tokens.map((token, index) => {
             const match = token.match(/^\[(\d+)\]$/);
@@ -1574,7 +1583,7 @@ function QuestionStage({
                     {answer.label}
                   </span>
                 ) : (
-                  <span className="font-mono text-xl text-white/45">
+                  <span className="font-mono text-xl text-[#17211c]">
                     [{target.label}]
                   </span>
                 )}
@@ -1617,7 +1626,7 @@ function QuestionStage({
         <div className="shrink-0">
           <span className="eyebrow">Phrase bank · 词组库</span>
           <h2 className="mt-2 text-3xl font-black">Choose a phrase · 选择词组</h2>
-          <p className="mt-1 text-lg leading-relaxed text-white/65">
+          <p className="mt-1 text-lg leading-relaxed text-[#25332d]">
             Grab a phrase, then release it over the matching position. / 拿起词组，松开放到对应位置。
           </p>
         </div>
@@ -1630,7 +1639,7 @@ function QuestionStage({
           </span>
           <span className="min-w-0 flex-1">
             <strong className="block text-xl">Show position · 查看位置</strong>
-            <span className="block text-base leading-relaxed text-white/60">
+            <span className="block text-base leading-relaxed text-[#25332d]">
               Drop a phrase here to reveal its position / 把词组放在这里可查看它的位置
             </span>
           </span>
@@ -1643,7 +1652,7 @@ function QuestionStage({
             <div
               key={answer.id}
               data-answer-card={answer.id}
-              className="flex min-h-16 cursor-none items-center rounded-xl border border-black/8 bg-white px-3 py-3 text-[clamp(1.1rem,1.2vw,1.5rem)] font-black leading-snug text-[#191b26] shadow-sm"
+              className={`flex min-h-16 cursor-none items-center rounded-xl border border-black/8 bg-white px-3 py-3 font-black leading-snug text-[#111814] shadow-sm ${isChinese ? "text-[clamp(1.4rem,1.6vw,1.9rem)]" : "text-[clamp(1.1rem,1.2vw,1.5rem)]"}`}
             >
               <TbHandGrab className="mr-2 size-6 shrink-0 text-[#e56b35]" />
               {answer.label}

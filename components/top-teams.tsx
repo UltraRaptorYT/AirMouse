@@ -78,9 +78,13 @@ export function TopTeams({ entries }: { entries: LeaderboardEntry[] }) {
       <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {challenges.map((challenge) => {
           const teams = rankTeams(entries.filter((entry) => entry.challengeId === challenge.id)).slice(0, 3);
+          const challengeNumber = challenge.number === 1 ? "一" : "二";
+          const challengeTitle = challenge.language === "zh"
+            ? `${challenge.label} · Chinese Challenge ${challenge.number}`
+            : `${challenge.label} · 英文挑战${challengeNumber}`;
           return (
             <div key={challenge.id} className="min-w-0 rounded-xl bg-white/[.03] p-3">
-              <h3 className="text-sm font-black">{challenge.label}</h3>
+              <h3 className="text-sm font-black">{challengeTitle}</h3>
               <p className="mb-2 text-[11px] text-white/40">{challenge.source}</p>
               {teams.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-black/10 p-3 text-sm text-white/55">No times yet · 暂无成绩，来争取第一名！</p>
