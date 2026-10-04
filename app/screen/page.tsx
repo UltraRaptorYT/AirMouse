@@ -70,6 +70,7 @@ const ROOM_TTL_MS = 20 * 60 * 1_000;
 const CHOICE_DWELL_MS = 5_000;
 const START_DWELL_MS = 2_000;
 const MEMORISE_MS = 45_000;
+const NEXT_ROOM_DELAY_MS = 45_000;
 // Per-frame interpolation toward the latest aim. 1 = snap instantly, lower = smoother but laggier.
 const CURSOR_LERP = 0.6;
 const CURSOR_SNAP_PX = 0.5;
@@ -149,7 +150,6 @@ export default function ScreenPage() {
   const [solvedAnswers, setSolvedAnswers] = useState<
     Record<string, SolvedAnswer>
   >({});
-  const [lastActions, setLastActions] = useState<Record<string, string>>({});
   const [dwell, setDwell] = useState<DwellState>(null);
   const [startReadyPlayerIds, setStartReadyPlayerIds] = useState<string[]>([]);
   const [startProgress, setStartProgress] = useState(0);
@@ -252,7 +252,6 @@ export default function ScreenPage() {
     draggingRef.current = {};
     setSolvedAnswers({});
     setDragging({});
-    setLastActions({});
     setHint(null);
   }, []);
 
@@ -294,6 +293,13 @@ export default function ScreenPage() {
     const timer = window.setTimeout(openFreshRoom, 0);
     return () => window.clearTimeout(timer);
   }, [openFreshRoom]);
+
+  useEffect(() => {
+    if (gameState.phase !== "finished") return;
+    const deadline = (gameState.completedAt ?? Date.now()) + NEXT_ROOM_DELAY_MS;
+    const timer = window.setTimeout(openFreshRoom, Math.max(0, deadline - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [gameState.completedAt, gameState.phase, openFreshRoom]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 250);
@@ -435,7 +441,7 @@ export default function ScreenPage() {
       return Object.values(solved).filter((entry) => entry.correct).length;
     }
 
-    function applyHint(playerId: string, answerId: string) {
+    function applyHint(answerId: string) {
       const state = gameStateRef.current;
       const activeQuestion = getQuestion(state.question?.id);
       if (state.phase !== "question" || !activeQuestion) return;
@@ -452,10 +458,6 @@ export default function ScreenPage() {
         targetLabel: target?.label ?? "?",
       });
       broadcastState({ ...state, penaltyMs: (state.penaltyMs ?? 0) + 25_000 });
-      setLastActions((current) => ({
-        ...current,
-        [playerId]: "Hint revealed: +25 seconds",
-      }));
     }
 
     function handleMessage(message: ServerRoomMessage) {
@@ -533,18 +535,10 @@ export default function ScreenPage() {
           !answerId ||
           Object.values(draggingRef.current).includes(answerId)
         ) {
-          setLastActions((current) => ({
-            ...current,
-            [action.playerId]: "Aim at a phrase card",
-          }));
           return;
         }
         const placed = solvedAnswersRef.current[answerId];
         if (placed?.correct) {
-          setLastActions((current) => ({
-            ...current,
-            [action.playerId]: "That one is already right",
-          }));
           return;
         }
         // Picking a wrongly-placed card back up frees its slot.
@@ -552,10 +546,6 @@ export default function ScreenPage() {
         const next = { ...draggingRef.current, [action.playerId]: answerId };
         draggingRef.current = next;
         setDragging(next);
-        setLastActions((current) => ({
-          ...current,
-          [action.playerId]: placed ? "Moving a phrase" : "Holding a phrase",
-        }));
         return;
       }
       if (message.type === "pointer-up") {
@@ -588,16 +578,12 @@ export default function ScreenPage() {
         setDragging(nextDragging);
 
         if (dropZone?.hasAttribute("data-hint-zone")) {
-          applyHint(action.playerId, answerId);
+          applyHint(answerId);
           return;
         }
 
         // Released outside any slot: card goes back to the pool, nothing else happens.
         if (!targetId || !answer) {
-          setLastActions((current) => ({
-            ...current,
-            [action.playerId]: "Dropped back in the pool",
-          }));
           return;
         }
 
@@ -605,10 +591,6 @@ export default function ScreenPage() {
           (id) => solvedAnswersRef.current[id].targetId === targetId,
         );
         if (occupantId && solvedAnswersRef.current[occupantId].correct) {
-          setLastActions((current) => ({
-            ...current,
-            [action.playerId]: "That slot is already filled",
-          }));
           socketRef.current?.send({
             type: "drop-result",
             payload: {
@@ -653,12 +635,6 @@ export default function ScreenPage() {
               payload: { questionId: activeQuestion.id },
             });
         }
-        setLastActions((current) => ({
-          ...current,
-          [action.playerId]: correct
-            ? "Correct! +100"
-            : "Placed - not the right spot",
-        }));
         const result: DropResultPayload = {
           playerId: action.playerId,
           questionId: activeQuestion.id,
@@ -930,6 +906,9 @@ export default function ScreenPage() {
   const submittedRank = submittedRunId
     ? challengeLeaderboard.findIndex((entry) => entry.id === submittedRunId) + 1
     : 0;
+  const nextRoomRemaining = gameState.phase === "finished" && gameState.completedAt
+    ? Math.max(0, gameState.completedAt + NEXT_ROOM_DELAY_MS - now)
+    : NEXT_ROOM_DELAY_MS;
 
   useEffect(() => {
     if (photoSaveState.status !== "saving") return;
@@ -1231,39 +1210,50 @@ export default function ScreenPage() {
                 Saving your time…
               </p>
             )}
-            {submittedRank >= 1 && submittedRank <= 3 && (
-              <TeamCamera key={submittedRunId} rank={submittedRank}
-                saveState={photoSaveState} onSave={saveTeamPhoto} />
-            )}
-            <div className="mt-8 w-full max-w-2xl space-y-2">
-              {rankedPlayers.map((player, index) => (
-                <div
-                  key={player.playerId}
-                  className={`flex items-center gap-4 rounded-2xl border px-5 py-4 text-left ${index === 0 ? "border-[#ffd166]/40 bg-[#ffd166]/10" : "border-white/8 bg-white/[.035]"}`}
-                >
-                  <span className="w-7 text-xl font-black text-white/30">
-                    {index + 1}
-                  </span>
-                  <span
-                    className="flex size-10 items-center justify-center rounded-xl font-black"
-                    style={{ backgroundColor: player.color }}
+            <div className="mt-8 grid w-full max-w-5xl items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(340px,440px)]">
+              <div className="w-full space-y-2">
+                {rankedPlayers.map((player, index) => (
+                  <div
+                    key={player.playerId}
+                    className={`flex items-center gap-4 rounded-2xl border px-5 py-4 text-left ${index === 0 ? "border-[#ffd166]/40 bg-[#ffd166]/10" : "border-white/8 bg-white/[.035]"}`}
                   >
-                    {player.name[0]?.toUpperCase()}
-                  </span>
-                  <span className="flex-1 text-lg font-bold">
-                    {player.name}
-                  </span>
-                  {index === 0 && <Crown className="size-5 text-[#ffd166]" />}
-                  <strong className="font-mono">{player.score} pts</strong>
-                </div>
-              ))}
+                    <span className="w-7 text-xl font-black text-white/30">
+                      {index + 1}
+                    </span>
+                    <span
+                      className="flex size-10 items-center justify-center rounded-xl font-black"
+                      style={{ backgroundColor: player.color }}
+                    >
+                      {player.name[0]?.toUpperCase()}
+                    </span>
+                    <span className="flex-1 text-lg font-bold">
+                      {player.name}
+                    </span>
+                    {index === 0 && <Crown className="size-5 text-[#ffd166]" />}
+                    <strong className="font-mono">{player.score} pts</strong>
+                  </div>
+                ))}
+              </div>
+              <TeamCamera
+                key={gameState.completedAt}
+                rank={submittedRank >= 1 && submittedRank <= 3 ? submittedRank : undefined}
+                saveState={photoSaveState}
+                onSave={saveTeamPhoto}
+                autoStart
+                autoSave={submittedRank >= 1 && submittedRank <= 3}
+              />
+            </div>
+            <div className="mt-6 flex items-center gap-3 rounded-2xl border border-[#e56b35]/25 bg-[#fff1e7] px-5 py-3 text-left">
+              <Clock3 className="size-5 shrink-0 text-[#e56b35]" aria-hidden="true" />
+              <span className="text-sm font-bold text-[#5b7068]">New room code appears automatically in</span>
+              <strong className="font-mono text-xl text-[#a44a22]">{formatTime(nextRoomRemaining)}</strong>
             </div>
             <Button
-              className="mt-8 h-13 rounded-2xl bg-white px-7 font-bold text-[#151722] hover:bg-white/90"
+              className="mt-4 h-13 rounded-2xl bg-white px-7 font-bold text-[#151722] hover:bg-white/90"
               onClick={openFreshRoom}
             >
               <RotateCcw className="mr-1 size-4" />
-              New group &amp; new code
+              Show new code now
             </Button>
           </section>
           <aside className="host-panel flex min-h-0 flex-col p-6">
@@ -1299,7 +1289,6 @@ export default function ScreenPage() {
         solvedAnswers={solvedAnswers}
         dragging={dragging}
         players={players}
-        lastActions={lastActions}
         elapsed={elapsed}
         penaltyMs={gameState.penaltyMs ?? 0}
         hint={hint}
@@ -1373,7 +1362,6 @@ function QuestionStage({
   solvedAnswers,
   dragging,
   players,
-  lastActions,
   elapsed,
   penaltyMs,
   hint,
@@ -1384,7 +1372,6 @@ function QuestionStage({
   solvedAnswers: Record<string, SolvedAnswer>;
   dragging: Record<string, string>;
   players: PlayerPresence[];
-  lastActions: Record<string, string>;
   elapsed: number;
   penaltyMs: number;
   hint: HintState;
@@ -1417,8 +1404,8 @@ function QuestionStage({
   return (
     <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_clamp(380px,36vw,620px)] lg:overflow-hidden">
       <section className="host-panel flex min-h-0 min-w-0 flex-col overflow-auto p-5 sm:p-6">
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-4">
-          <div>
+        <div className="grid shrink-0 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_auto]">
+          <div className="min-w-0">
             <span className="eyebrow">
               {challengeLabel ?? "Fill the passage"}
             </span>
@@ -1426,7 +1413,7 @@ function QuestionStage({
               {question.instruction}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex shrink-0 flex-wrap items-center gap-3 xl:flex-nowrap">
             <div className="rounded-2xl bg-[#edf4ef] px-4 py-3">
               <p className="text-sm text-white/40">Time</p>
               <p className="font-mono text-3xl font-black">
@@ -1504,22 +1491,27 @@ function QuestionStage({
             );
           })}
         </div>
-        <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2 border-t border-white/10 pt-3">
-          {players.map((player) => (
-            <span
-              key={player.playerId}
-              className="inline-flex items-center gap-2 rounded-full bg-[#edf4ef] px-3 py-2 text-sm font-bold"
-            >
+        <div className="mt-3 flex min-h-10 shrink-0 items-center gap-3 border-t border-white/10 pt-3">
+          <div className="flex shrink-0 items-center pl-1" aria-label={`${players.length} players connected`}>
+            {players.slice(0, 5).map((player, index) => (
               <span
-                className="size-2.5 rounded-full"
-                style={{ backgroundColor: player.color }}
-              />
-              {player.name}
-              <span className="font-mono">
-                {lastActions[player.playerId] ?? "Aiming"}
+                key={player.playerId}
+                title={player.name}
+                className={`keep-white flex size-7 items-center justify-center rounded-full border-2 border-white text-[11px] font-black text-white ${index === 0 ? "" : "-ml-1.5"}`}
+                style={{ backgroundColor: player.color, zIndex: 5 - index }}
+              >
+                {player.name[0]?.toUpperCase()}
               </span>
-            </span>
-          ))}
+            ))}
+            {players.length > 5 && (
+              <span className="-ml-1.5 flex h-7 min-w-7 items-center justify-center rounded-full border-2 border-white bg-[#edf4ef] px-1 text-[10px] font-black">
+                +{players.length - 5}
+              </span>
+            )}
+          </div>
+          <strong className="truncate text-sm">
+            {players.length} {players.length === 1 ? "player" : "players"} connected
+          </strong>
           <span className="ml-auto flex items-center gap-2 text-sm text-white/35">
             <MousePointer2 className="size-4" />
             AirMouse live
