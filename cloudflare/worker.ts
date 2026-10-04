@@ -19,6 +19,7 @@ type SocketAttachment = {
 interface Env {
   ROOMS: DurableObjectNamespace<Room>;
   LEADERBOARD: DurableObjectNamespace<Leaderboard>;
+  SHARED_PHOTOS: DurableObjectNamespace<SharedPhoto>;
   ALLOWED_ORIGINS?: string;
 }
 
@@ -28,6 +29,7 @@ const LEADERBOARD_ID = "global";
 const LEADERBOARD_PER_CHALLENGE = 10;
 const LEADERBOARD_MIN_TIME_MS = 10_000;
 const LEADERBOARD_MAX_TIME_MS = 6 * 60 * 60 * 1_000;
+const SHARED_PHOTO_TTL_MS = 24 * 60 * 60 * 1_000;
 
 function jsonResponse(body: unknown, status = 200) {
   return Response.json(body, {
@@ -199,6 +201,34 @@ export class Leaderboard extends DurableObject<Env> {
 
   async photo(runId: string): Promise<string | undefined> {
     return this.ctx.storage.get<string>(`photo:${runId}`);
+  }
+}
+
+/** Temporary public photo link for captured photos that are not leaderboard entries. */
+export class SharedPhoto extends DurableObject<Env> {
+  async save(photo: unknown): Promise<boolean> {
+    if (
+      typeof photo !== "string" || photo.length > MAX_TEAM_PHOTO_LENGTH ||
+      !/^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/]*={0,2}$/.test(photo)
+    ) return false;
+    try {
+      const bytes = atob(photo.slice("data:image/jpeg;base64,".length));
+      if (!bytes.endsWith("\xff\xd9")) return false;
+    } catch {
+      return false;
+    }
+
+    await this.ctx.storage.put("photo", photo);
+    await this.ctx.storage.setAlarm(Date.now() + SHARED_PHOTO_TTL_MS);
+    return true;
+  }
+
+  async photo(): Promise<string | undefined> {
+    return this.ctx.storage.get<string>("photo");
+  }
+
+  async alarm(): Promise<void> {
+    await this.ctx.storage.deleteAll();
   }
 }
 
@@ -513,9 +543,53 @@ export default {
       return response;
     }
 
+    const sharePath = "/leaderboard/photos/share";
+    if (url.pathname === sharePath && request.method === "OPTIONS") {
+      if (!isOriginAllowed(request, env.ALLOWED_ORIGINS)) {
+        return jsonResponse({ error: "Origin not allowed" }, 403);
+      }
+      return new Response(null, { status: 204, headers: {
+        "access-control-allow-origin": request.headers.get("origin") ?? "*",
+        "access-control-allow-methods": "POST, OPTIONS",
+        "access-control-allow-headers": "content-type",
+        "access-control-max-age": "86400",
+        vary: "Origin",
+      } });
+    }
+    if (url.pathname === sharePath && request.method === "POST") {
+      if (!isOriginAllowed(request, env.ALLOWED_ORIGINS)) {
+        return jsonResponse({ error: "Origin not allowed" }, 403);
+      }
+      const origin = request.headers.get("origin") ?? "*";
+      const respond = (body: unknown, status = 200) => {
+        const response = jsonResponse(body, status);
+        response.headers.set("access-control-allow-origin", origin);
+        response.headers.set("vary", "Origin");
+        return response;
+      };
+      const contentLength = Number(request.headers.get("content-length") ?? 0);
+      if (contentLength > MAX_TEAM_PHOTO_LENGTH + 256) {
+        return respond({ error: "Photo is too large." }, 413);
+      }
+      let body: { photo?: unknown };
+      try {
+        body = await request.json() as { photo?: unknown };
+      } catch {
+        return respond({ error: "Invalid photo upload." }, 400);
+      }
+      const id = `s-${crypto.randomUUID()}`;
+      const saved = await env.SHARED_PHOTOS.getByName(id).save(body.photo);
+      return saved
+        ? respond({ id }, 201)
+        : respond({ error: "Please take a new photo and try again." }, 400);
+    }
+
     const photoMatch = url.pathname.match(/^\/leaderboard\/photos\/([A-Za-z0-9-]{1,64})(\/download)?$/);
     if (photoMatch && request.method === "GET") {
-      const photo = await env.LEADERBOARD.getByName(LEADERBOARD_ID).photo(photoMatch[1]);
+      const id = photoMatch[1];
+      const photo = id.startsWith("s-")
+        ? await env.SHARED_PHOTOS.getByName(id).photo()
+        : await env.LEADERBOARD.getByName(LEADERBOARD_ID).photo(id);
       if (!photo) return jsonResponse({ error: "Photo not found" }, 404);
       const bytes = Uint8Array.from(atob(photo.split(",")[1]), (character) => character.charCodeAt(0));
       return new Response(bytes, { headers: {

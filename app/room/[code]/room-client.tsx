@@ -483,7 +483,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
               htmlFor="nickname"
               className="text-sm font-bold text-[#30323c]"
             >
-              Your nickname
+              Your Name
             </label>
             <div className="mt-2.5 flex items-center rounded-2xl border border-black/10 bg-[#f7f6f2] px-4 focus-within:border-[#ff6b4a]/60 focus-within:ring-4 focus-within:ring-[#ff6b4a]/10">
               <UserRound className="size-5 text-[#9698a0]" />
@@ -491,7 +491,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
                 id="nickname"
                 value={nickname}
                 maxLength={18}
-                placeholder="e.g. Mighty Mango"
+                placeholder="e.g. Alex, Jess"
                 autoComplete="nickname"
                 className="h-14 border-0 bg-transparent px-3 text-base font-semibold shadow-none focus-visible:ring-0"
                 onChange={(event) => setNickname(event.target.value)}

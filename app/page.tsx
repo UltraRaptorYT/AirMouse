@@ -46,29 +46,35 @@ export default function HomePage() {
             onClick={() => router.push("/screen")}
           >
             <MonitorUp className="mr-1 size-4" />
-            Host a game
+            Host a game · 主持游戏
           </Button>
         </header>
 
         <div className="grid flex-1 items-center gap-12 py-10 lg:grid-cols-[1.08fr_.92fr]">
           <section>
-            <span className="eyebrow">Multiplayer sorting game</span>
+            <span className="eyebrow">Multiplayer sorting game · 多人分类游戏</span>
             <h1 className="mt-6 max-w-3xl text-balance text-5xl font-black leading-[.92] tracking-[-.055em] sm:text-7xl lg:text-[5.4rem]">
               Think fast.
               <br />
               Drag smart.
             </h1>
-            <p className="mt-6 max-w-xl text-lg leading-relaxed text-white/55">
+            <p className="mt-3 max-w-3xl text-3xl font-black tracking-[-.04em] sm:text-4xl" lang="zh-Hans">
+              快速思考，精准拖动。
+            </p>
+            <p className="mt-5 max-w-xl text-lg leading-relaxed text-white/55">
               Scan the host&apos;s QR code, use your phone as a motion
               controller, and race your friends to fly every answer into the
               right box.
             </p>
+            <p className="mt-2 max-w-xl text-lg leading-relaxed text-white/55" lang="zh-Hans">
+              扫描主持人屏幕上的二维码，用手机控制光标，和朋友一起把答案拖到正确的位置。
+            </p>
 
             <div className="mt-9 grid max-w-xl grid-cols-3 gap-3">
               {[
-                [QrCode, "Scan"],
-                [MousePointer2, "Sort"],
-                [Smartphone, "Score"],
+                [QrCode, "Scan · 扫码"],
+                [MousePointer2, "Sort · 分类"],
+                [Smartphone, "Score · 得分"],
               ].map(([Icon, label], index) => {
                 const StepIcon = Icon as typeof QrCode;
                 return (
@@ -97,9 +103,9 @@ export default function HomePage() {
                   <Keyboard className="size-5 text-white/65" />
                 </span>
                 <div>
-                  <p className="font-bold">Can&apos;t scan the QR?</p>
-                  <p className="text-sm text-white/40">
-                    Join manually with the room code
+                  <p className="font-bold">Can&apos;t scan the QR? · 无法扫描二维码？</p>
+                  <p className="text-sm text-white/55">
+                    Join with the room code · 使用房间代码加入
                   </p>
                 </div>
               </div>
@@ -109,7 +115,7 @@ export default function HomePage() {
                   htmlFor="room"
                   className="text-xs font-bold uppercase tracking-[.18em] text-white/40"
                 >
-                  Room code
+                  Room code · 房间代码
                 </label>
                 <Input
                   id="room"
@@ -138,14 +144,14 @@ export default function HomePage() {
                 disabled={roomCode.length !== 6}
                 onClick={joinRoom}
               >
-                Enter room
+                Enter room · 进入房间
                 <ArrowRight className="ml-1 size-4" />
               </Button>
 
               <div className="mt-7 border-t border-white/8 pt-6 text-center text-xs leading-relaxed text-white/30">
-                If you can scan, use the QR on the host screen.
+                If you can scan, use the QR on the host screen. · 请扫描主持人屏幕上的二维码。
                 <br />
-                It takes you straight to your room.
+                It takes you straight to your room. · 扫描后即可加入房间。
               </div>
             </div>
           </section>

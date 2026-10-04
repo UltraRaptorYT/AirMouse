@@ -15,6 +15,10 @@
       {
         "name": "LEADERBOARD",
         "class_name": "Leaderboard"
+      },
+      {
+        "name": "SHARED_PHOTOS",
+        "class_name": "SharedPhoto"
       }
     ]
   },
@@ -26,6 +30,10 @@
     {
       "tag": "v2",
       "new_sqlite_classes": ["Leaderboard"]
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["SharedPhoto"]
     }
   ]
 }

@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import { Camera, Check, RotateCcw } from "lucide-react";
+import { Camera, Check, Download, RotateCcw } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { Button } from "@/components/ui/button";
-import { leaderboardUrl, MAX_TEAM_PHOTO_LENGTH } from "@/lib/realtime/leaderboard";
+import { MAX_TEAM_PHOTO_LENGTH } from "@/lib/realtime/leaderboard";
 
-export type PhotoSaveState = { status: "idle" | "saving" | "saved" | "error"; error?: string };
+export type PhotoSaveState = { status: "idle" | "saving" | "saved" | "error"; error?: string; downloadUrl?: string };
 
 function waitForVideoFrame(video: HTMLVideoElement) {
   if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0) {
@@ -42,9 +42,8 @@ function waitForVideoFrame(video: HTMLVideoElement) {
   });
 }
 
-export function TeamCamera({ rank, runId, saveState, onSave, autoStart = false, autoSave = false }: {
+export function TeamCamera({ rank, saveState, onSave, autoStart = false, autoSave = false }: {
   rank?: number;
-  runId?: string | null;
   saveState: PhotoSaveState;
   onSave: (photo: string) => void;
   autoStart?: boolean;
@@ -60,25 +59,7 @@ export function TeamCamera({ rank, runId, saveState, onSave, autoStart = false, 
   const [countdown, setCountdown] = useState<number | null>(null);
   const [photo, setPhoto] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [qrSecondsRemaining, setQrSecondsRemaining] = useState<number | null>(null);
-  const photoDownloadUrl = runId
-    ? leaderboardUrl(`/photos/${encodeURIComponent(runId)}/download`)
-    : null;
-
-  useEffect(() => {
-    if (!photo || !rank || !runId) {
-      setQrSecondsRemaining(null);
-      return;
-    }
-    const readyAt = Date.now() + 30_000;
-    setQrSecondsRemaining(30);
-    const timer = window.setInterval(() => {
-      const remaining = Math.max(0, Math.ceil((readyAt - Date.now()) / 1_000));
-      setQrSecondsRemaining(remaining);
-      if (remaining === 0) window.clearInterval(timer);
-    }, 250);
-    return () => window.clearInterval(timer);
-  }, [photo, rank, runId]);
+  const photoDownloadUrl = saveState.downloadUrl;
 
   useEffect(() => () => {
     requestRef.current += 1;
@@ -112,6 +93,15 @@ export function TeamCamera({ rank, runId, saveState, onSave, autoStart = false, 
       context.translate(canvas.width, 0);
       context.scale(-1, 1);
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      const watermarkSize = Math.max(14, Math.round(canvas.width * 0.035));
+      const watermarkHeight = watermarkSize + Math.round(canvas.width * 0.035);
+      context.fillStyle = "rgba(0, 0, 0, 0.58)";
+      context.fillRect(0, canvas.height - watermarkHeight, canvas.width, watermarkHeight);
+      context.fillStyle = "#ffffff";
+      context.font = `700 ${watermarkSize}px system-ui, sans-serif`;
+      context.textBaseline = "middle";
+      context.fillText("AirMouse  •  Team Photo", Math.round(canvas.width * 0.025), canvas.height - watermarkHeight / 2);
 
       let snapshot = "";
       for (const quality of [0.8, 0.65, 0.5, 0.35, 0.2]) {
@@ -232,34 +222,30 @@ export function TeamCamera({ rank, runId, saveState, onSave, autoStart = false, 
       </div>
 
       {(error || saveState.error) && <p role="alert" className="mt-3 text-sm text-[#a44a22]">{error || saveState.error}</p>}
-      {photo && rank && photoDownloadUrl && saveState.status === "saved" && qrSecondsRemaining !== null && (
+      {photo && photoDownloadUrl && saveState.status === "saved" && (
         <div className="mt-4 rounded-2xl border border-[#16865c]/20 bg-white p-4 text-center">
-          {qrSecondsRemaining > 0 ? (
-            <p role="status" className="text-sm font-semibold text-[#5b7068]">
-              Your photo download QR code will appear in {qrSecondsRemaining} seconds.
-            </p>
-          ) : (
-            <>
-              <p className="text-sm font-bold text-[#17211c]">Scan to download your team photo</p>
-              <div className="mx-auto mt-3 w-fit rounded-xl border border-black/5 bg-white p-2">
-                <QRCodeSVG value={photoDownloadUrl}
-                  size={180} level="M" bgColor="#ffffff" fgColor="#17211c" />
-              </div>
-            </>
-          )}
+          <p className="text-sm font-bold text-[#17211c]">Scan to download your watermarked team photo</p>
+          <div className="mx-auto mt-3 w-fit rounded-xl border border-black/5 bg-white p-2">
+            <QRCodeSVG value={photoDownloadUrl} size={180} level="M" bgColor="#ffffff" fgColor="#17211c" />
+          </div>
+          <a href={photoDownloadUrl} className="mt-3 inline-flex items-center gap-2 rounded-xl bg-[#16865c] px-4 py-2 text-sm font-bold text-white hover:bg-[#116b49]">
+            <Download className="size-4" /> Download on this device
+          </a>
         </div>
       )}
       <div className="mt-4 flex flex-wrap justify-center gap-2">
         {saveState.status === "saved" ? (
-          <p role="status" className="flex items-center gap-2 font-bold text-[#087653]"><Check className="size-5" /> Team photo saved!</p>
+          <p role="status" className="flex items-center gap-2 font-bold text-[#087653]"><Check className="size-5" /> {rank ? "Team photo saved!" : "Photo ready to download!"}</p>
         ) : photo ? (
           <>
             <Button variant="outline" disabled={saveState.status === "saving"} onClick={() => void openCamera()}><RotateCcw className="size-4" /> Retake</Button>
-            {rank ? (
-              <Button disabled={saveState.status === "saving"} onClick={() => onSave(photo)}>{saveState.status === "saving" ? "Saving…" : "Save team photo"}</Button>
-            ) : (
+            {saveState.status === "saving" ? (
+              <p role="status" className="font-bold text-[#5b7068]">Saving photo…</p>
+            ) : saveState.status === "error" ? (
+              <Button onClick={() => onSave(photo)}>Retry photo save</Button>
+            ) : !rank ? (
               <p role="status" className="flex items-center gap-2 font-bold text-[#087653]"><Check className="size-5" /> Photo captured!</p>
-            )}
+            ) : <Button onClick={() => onSave(photo)}>Save team photo</Button>}
           </>
         ) : camera !== "off" ? (
           <Button variant="outline" onClick={stopCamera}>Cancel</Button>

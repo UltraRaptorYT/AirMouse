@@ -22,7 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { TeamCamera, type PhotoSaveState } from "@/components/team-camera";
 import { TeamPhoto, TopTeams } from "@/components/top-teams";
-import { rankTeams } from "@/lib/realtime/leaderboard";
+import { leaderboardUrl, rankTeams } from "@/lib/realtime/leaderboard";
 import {
   getChallenge,
   getQuestion,
@@ -479,7 +479,10 @@ export default function ScreenPage() {
           setPhotoSaveState(
             message.payload.error
               ? { status: "error", error: message.payload.error }
-              : { status: "saved" },
+              : {
+                  status: "saved",
+                  downloadUrl: leaderboardUrl(`/photos/${encodeURIComponent(message.payload.runId)}/download`) ?? undefined,
+                },
           );
         }
         return;
@@ -935,20 +938,52 @@ export default function ScreenPage() {
   }, [photoSaveState.status]);
 
   function saveTeamPhoto(photo: string) {
-    if (!submittedRunId || submittedRank < 1 || submittedRank > 3) return;
-    photoRunRef.current = submittedRunId;
-    const sent = socketRef.current?.send({
-      type: "submit-team-photo",
-      payload: { runId: submittedRunId, photo },
-    });
-    setPhotoSaveState(
-      sent
-        ? { status: "saving" }
-        : {
+    const requestId = submittedRunId ?? `shared-${Date.now()}`;
+    photoRunRef.current = requestId;
+    if (submittedRunId && submittedRank >= 1 && submittedRank <= 3) {
+      const sent = socketRef.current?.send({
+        type: "submit-team-photo",
+        payload: { runId: submittedRunId, photo },
+      });
+      setPhotoSaveState(
+        sent
+          ? { status: "saving" }
+          : { status: "error", error: "Connection lost. Please reconnect and try again." },
+      );
+      return;
+    }
+
+    const uploadUrl = leaderboardUrl("/photos/share");
+    if (!uploadUrl) {
+      setPhotoSaveState({ status: "error", error: "Photo sharing is unavailable. Please try again." });
+      return;
+    }
+    setPhotoSaveState({ status: "saving" });
+    void (async () => {
+      try {
+        const response = await fetch(uploadUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ photo }),
+        });
+        const result = await response.json() as { id?: string; error?: string };
+        if (!response.ok || !result.id) {
+          throw new Error(result.error || "Could not save the photo for download.");
+        }
+        const downloadUrl = leaderboardUrl(`/photos/${encodeURIComponent(result.id)}/download`);
+        if (!downloadUrl) throw new Error("Photo sharing is unavailable. Please try again.");
+        if (photoRunRef.current === requestId) {
+          setPhotoSaveState({ status: "saved", downloadUrl });
+        }
+      } catch (uploadError) {
+        if (photoRunRef.current === requestId) {
+          setPhotoSaveState({
             status: "error",
-            error: "Connection lost. Please reconnect and try again.",
-          },
-    );
+            error: uploadError instanceof Error ? uploadError.message : "Could not save the photo for download.",
+          });
+        }
+      }
+    })();
   }
 
   if (gameState.phase === "lobby") {
@@ -1296,11 +1331,10 @@ export default function ScreenPage() {
                     ? submittedRank
                     : undefined
                 }
-                runId={submittedRunId}
                 saveState={photoSaveState}
                 onSave={saveTeamPhoto}
                 autoStart
-                autoSave={submittedRank >= 1 && submittedRank <= 3}
+                autoSave
               />
             </div>
             <div className="mt-6 flex items-center gap-3 rounded-2xl border border-[#e56b35]/25 bg-[#fff1e7] px-5 py-3 text-left">
