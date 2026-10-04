@@ -1296,6 +1296,7 @@ export default function ScreenPage() {
                     ? submittedRank
                     : undefined
                 }
+                runId={submittedRunId}
                 saveState={photoSaveState}
                 onSave={saveTeamPhoto}
                 autoStart

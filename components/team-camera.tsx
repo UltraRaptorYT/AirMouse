@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { Camera, Check, RotateCcw } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { Button } from "@/components/ui/button";
-import { MAX_TEAM_PHOTO_LENGTH } from "@/lib/realtime/leaderboard";
+import { leaderboardUrl, MAX_TEAM_PHOTO_LENGTH } from "@/lib/realtime/leaderboard";
 
 export type PhotoSaveState = { status: "idle" | "saving" | "saved" | "error"; error?: string };
 
@@ -41,8 +42,9 @@ function waitForVideoFrame(video: HTMLVideoElement) {
   });
 }
 
-export function TeamCamera({ rank, saveState, onSave, autoStart = false, autoSave = false }: {
+export function TeamCamera({ rank, runId, saveState, onSave, autoStart = false, autoSave = false }: {
   rank?: number;
+  runId?: string | null;
   saveState: PhotoSaveState;
   onSave: (photo: string) => void;
   autoStart?: boolean;
@@ -58,6 +60,25 @@ export function TeamCamera({ rank, saveState, onSave, autoStart = false, autoSav
   const [countdown, setCountdown] = useState<number | null>(null);
   const [photo, setPhoto] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [qrSecondsRemaining, setQrSecondsRemaining] = useState<number | null>(null);
+  const photoDownloadUrl = runId
+    ? leaderboardUrl(`/photos/${encodeURIComponent(runId)}/download`)
+    : null;
+
+  useEffect(() => {
+    if (!photo || !rank || !runId) {
+      setQrSecondsRemaining(null);
+      return;
+    }
+    const readyAt = Date.now() + 30_000;
+    setQrSecondsRemaining(30);
+    const timer = window.setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((readyAt - Date.now()) / 1_000));
+      setQrSecondsRemaining(remaining);
+      if (remaining === 0) window.clearInterval(timer);
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [photo, rank, runId]);
 
   useEffect(() => () => {
     requestRef.current += 1;
@@ -211,6 +232,23 @@ export function TeamCamera({ rank, saveState, onSave, autoStart = false, autoSav
       </div>
 
       {(error || saveState.error) && <p role="alert" className="mt-3 text-sm text-[#a44a22]">{error || saveState.error}</p>}
+      {photo && rank && photoDownloadUrl && saveState.status === "saved" && qrSecondsRemaining !== null && (
+        <div className="mt-4 rounded-2xl border border-[#16865c]/20 bg-white p-4 text-center">
+          {qrSecondsRemaining > 0 ? (
+            <p role="status" className="text-sm font-semibold text-[#5b7068]">
+              Your photo download QR code will appear in {qrSecondsRemaining} seconds.
+            </p>
+          ) : (
+            <>
+              <p className="text-sm font-bold text-[#17211c]">Scan to download your team photo</p>
+              <div className="mx-auto mt-3 w-fit rounded-xl border border-black/5 bg-white p-2">
+                <QRCodeSVG value={photoDownloadUrl}
+                  size={180} level="M" bgColor="#ffffff" fgColor="#17211c" />
+              </div>
+            </>
+          )}
+        </div>
+      )}
       <div className="mt-4 flex flex-wrap justify-center gap-2">
         {saveState.status === "saved" ? (
           <p role="status" className="flex items-center gap-2 font-bold text-[#087653]"><Check className="size-5" /> Team photo saved!</p>

@@ -2,23 +2,69 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { Trophy, Users } from "lucide-react";
+import { Download, Trophy, Users, X } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { challenges } from "@/lib/game/questions";
 import { leaderboardUrl, rankTeams } from "@/lib/realtime/leaderboard";
 import type { LeaderboardEntry, LeaderboardPayload } from "@/lib/realtime/types";
 
 export function TeamPhoto({ entry, compact = false }: { entry: LeaderboardEntry; compact?: boolean }) {
-  const src = entry.hasPhoto
-    ? leaderboardUrl(`/photos/${encodeURIComponent(entry.id)}`)
-    : null;
+  const [showDownload, setShowDownload] = useState(false);
+  const photoPath = `/photos/${encodeURIComponent(entry.id)}`;
+  const src = entry.hasPhoto ? leaderboardUrl(photoPath) : null;
+  const downloadUrl = entry.hasPhoto ? leaderboardUrl(`${photoPath}/download`) : null;
   const size = compact ? "h-9 w-11 rounded-lg" : "h-12 w-14 rounded-xl sm:h-16 sm:w-20";
-  return src ? (
-    <Image src={src} alt={`${entry.teamName} team photo`} width={96} height={72}
-      unoptimized className={`${size} shrink-0 object-cover`} />
-  ) : (
-    <span className={`${size} flex shrink-0 items-center justify-center bg-[#edf4ef] text-[#16865c]`}>
-      <Users className={compact ? "size-5" : "size-7"} />
-    </span>
+  useEffect(() => {
+    if (!showDownload) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setShowDownload(false);
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [showDownload]);
+  return (
+    <>
+      {src ? (
+        compact ? (
+          <Image src={src} alt={`${entry.teamName} team photo`} width={96} height={72}
+            unoptimized className={`${size} shrink-0 object-cover`} />
+        ) : (
+          <button type="button" onClick={() => setShowDownload(true)}
+            className="group relative shrink-0 rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#44d79b]"
+            aria-label={`Show QR code to download ${entry.teamName}'s photo`}>
+            <Image src={src} alt={`${entry.teamName} team photo`} width={96} height={72}
+              unoptimized className={`${size} object-cover`} />
+            <span className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 rounded-b-xl bg-black/75 px-1 py-1 text-[9px] font-bold text-white opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
+              <Download className="size-3" /> QR download
+            </span>
+          </button>
+        )
+      ) : (
+        <span className={`${size} flex shrink-0 items-center justify-center bg-[#edf4ef] text-[#16865c]`}>
+          <Users className={compact ? "size-5" : "size-7"} />
+        </span>
+      )}
+      {showDownload && downloadUrl && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setShowDownload(false);
+        }}>
+          <section role="dialog" aria-modal="true" aria-label="Download team photo"
+            className="relative w-full max-w-sm rounded-3xl bg-white p-6 text-center text-[#17211c] shadow-2xl">
+            <button type="button" onClick={() => setShowDownload(false)}
+              className="absolute right-3 top-3 rounded-full p-2 text-[#5b7068] hover:bg-black/5 focus-visible:outline-2 focus-visible:outline-[#16865c]"
+              aria-label="Close QR code"><X className="size-5" /></button>
+            <h2 className="pr-8 text-left text-xl font-black">Download team photo</h2>
+            <p className="mt-2 text-sm text-[#5b7068]">Scan this QR code with your phone to download {entry.teamName}&apos;s photo.</p>
+            <div className="mx-auto mt-5 w-fit rounded-2xl border border-black/5 bg-white p-3">
+              <QRCodeSVG value={downloadUrl} size={220} level="M" bgColor="#ffffff" fgColor="#17211c" />
+            </div>
+            <a href={downloadUrl} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#16865c] px-4 py-2.5 text-sm font-bold text-white hover:bg-[#116b49]">
+              <Download className="size-4" /> Download on this device
+            </a>
+          </section>
+        </div>
+      )}
+    </>
   );
 }
 

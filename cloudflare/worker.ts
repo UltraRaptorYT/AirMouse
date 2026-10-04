@@ -513,13 +513,14 @@ export default {
       return response;
     }
 
-    const photoMatch = url.pathname.match(/^\/leaderboard\/photos\/([A-Za-z0-9-]{1,64})$/);
+    const photoMatch = url.pathname.match(/^\/leaderboard\/photos\/([A-Za-z0-9-]{1,64})(\/download)?$/);
     if (photoMatch && request.method === "GET") {
       const photo = await env.LEADERBOARD.getByName(LEADERBOARD_ID).photo(photoMatch[1]);
       if (!photo) return jsonResponse({ error: "Photo not found" }, 404);
       const bytes = Uint8Array.from(atob(photo.split(",")[1]), (character) => character.charCodeAt(0));
       return new Response(bytes, { headers: {
         "content-type": "image/jpeg",
+        ...(photoMatch[2] ? { "content-disposition": `attachment; filename="team-photo-${photoMatch[1]}.jpg"` } : {}),
         "cache-control": "public, max-age=3600",
         "x-content-type-options": "nosniff",
       } });
