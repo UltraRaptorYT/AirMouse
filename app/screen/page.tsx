@@ -155,7 +155,9 @@ export default function ScreenPage() {
   const [startProgress, setStartProgress] = useState(0);
   const [hint, setHint] = useState<HintState>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
-  const [photoSaveState, setPhotoSaveState] = useState<PhotoSaveState>({ status: "idle" });
+  const [photoSaveState, setPhotoSaveState] = useState<PhotoSaveState>({
+    status: "idle",
+  });
   const photoRunRef = useRef<string | null>(null);
   // The id of the run this host submitted for the current finish, so we can highlight it and never double-submit.
   const [submittedRunId, setSubmittedRunId] = useState<string | null>(null);
@@ -297,7 +299,10 @@ export default function ScreenPage() {
   useEffect(() => {
     if (gameState.phase !== "finished") return;
     const deadline = (gameState.completedAt ?? Date.now()) + NEXT_ROOM_DELAY_MS;
-    const timer = window.setTimeout(openFreshRoom, Math.max(0, deadline - Date.now()));
+    const timer = window.setTimeout(
+      openFreshRoom,
+      Math.max(0, deadline - Date.now()),
+    );
     return () => window.clearTimeout(timer);
   }, [gameState.completedAt, gameState.phase, openFreshRoom]);
 
@@ -471,9 +476,11 @@ export default function ScreenPage() {
       }
       if (message.type === "team-photo-result") {
         if (message.payload.runId === photoRunRef.current) {
-          setPhotoSaveState(message.payload.error
-            ? { status: "error", error: message.payload.error }
-            : { status: "saved" });
+          setPhotoSaveState(
+            message.payload.error
+              ? { status: "error", error: message.payload.error }
+              : { status: "saved" },
+          );
         }
         return;
       }
@@ -555,15 +562,16 @@ export default function ScreenPage() {
           renderedCursorsRef.current[action.playerId] ??
           cursorsRef.current[action.playerId];
         const activeQuestion = getQuestion(gameStateRef.current.question?.id);
-        if (!answerId || !cursor || !activeQuestion || gameStateRef.current.phase !== "question") return;
-        const dropZone = findCursorElement(
-          "[data-answer-target], [data-hint-zone]",
-          cursor,
-        ) ?? findCursorElement(
-          "[data-answer-target]",
-          cursor,
-          TARGET_HIT_SLOP_PX,
-        );
+        if (
+          !answerId ||
+          !cursor ||
+          !activeQuestion ||
+          gameStateRef.current.phase !== "question"
+        )
+          return;
+        const dropZone =
+          findCursorElement("[data-answer-target], [data-hint-zone]", cursor) ??
+          findCursorElement("[data-answer-target]", cursor, TARGET_HIT_SLOP_PX);
         const targetId = dropZone?.dataset.answerTarget;
         const answer = activeQuestion.answers.find(
           (item) => item.id === answerId,
@@ -900,21 +908,29 @@ export default function ScreenPage() {
       : undefined;
   const challengeLeaderboard = useMemo(
     () =>
-      rankTeams(leaderboard.filter((entry) => entry.challengeId === currentChallengeId)),
+      rankTeams(
+        leaderboard.filter((entry) => entry.challengeId === currentChallengeId),
+      ),
     [currentChallengeId, leaderboard],
   );
   const submittedRank = submittedRunId
     ? challengeLeaderboard.findIndex((entry) => entry.id === submittedRunId) + 1
     : 0;
-  const nextRoomRemaining = gameState.phase === "finished" && gameState.completedAt
-    ? Math.max(0, gameState.completedAt + NEXT_ROOM_DELAY_MS - now)
-    : NEXT_ROOM_DELAY_MS;
+  const nextRoomRemaining =
+    gameState.phase === "finished" && gameState.completedAt
+      ? Math.max(0, gameState.completedAt + NEXT_ROOM_DELAY_MS - now)
+      : NEXT_ROOM_DELAY_MS;
 
   useEffect(() => {
     if (photoSaveState.status !== "saving") return;
-    const timer = window.setTimeout(() => setPhotoSaveState({
-      status: "error", error: "Photo saving timed out. Please retry.",
-    }), 15_000);
+    const timer = window.setTimeout(
+      () =>
+        setPhotoSaveState({
+          status: "error",
+          error: "Photo saving timed out. Please retry.",
+        }),
+      15_000,
+    );
     return () => window.clearTimeout(timer);
   }, [photoSaveState.status]);
 
@@ -922,11 +938,17 @@ export default function ScreenPage() {
     if (!submittedRunId || submittedRank < 1 || submittedRank > 3) return;
     photoRunRef.current = submittedRunId;
     const sent = socketRef.current?.send({
-      type: "submit-team-photo", payload: { runId: submittedRunId, photo },
+      type: "submit-team-photo",
+      payload: { runId: submittedRunId, photo },
     });
-    setPhotoSaveState(sent ? { status: "saving" } : {
-      status: "error", error: "Connection lost. Please reconnect and try again.",
-    });
+    setPhotoSaveState(
+      sent
+        ? { status: "saving" }
+        : {
+            status: "error",
+            error: "Connection lost. Please reconnect and try again.",
+          },
+    );
   }
 
   if (gameState.phase === "lobby") {
@@ -962,6 +984,18 @@ export default function ScreenPage() {
                 together.
               </p>
               <div className="mt-7 inline-flex items-center gap-4 rounded-2xl border border-white/10 bg-black/20 px-5 py-4">
+                <div className="flex items-center gap-3">
+                  {(status === "connecting" || status === "reconnecting") && (
+                    <LoaderCircle className="size-4 animate-spin text-white/40" />
+                  )}
+                  {status === "error" && (
+                    <WifiOff className="size-4 text-red-500" />
+                  )}
+                  <span className="hidden items-center gap-1.5 text-sm text-white/40 sm:flex">
+                    <Clock3 className="size-4" />
+                    code {formatTime(roomRemaining)}
+                  </span>
+                </div>
                 <span className="text-base text-white/45">Room code</span>
                 <strong className="font-mono text-2xl tracking-[.22em]">
                   {roomCode || "------"}
@@ -1236,7 +1270,11 @@ export default function ScreenPage() {
               </div>
               <TeamCamera
                 key={gameState.completedAt}
-                rank={submittedRank >= 1 && submittedRank <= 3 ? submittedRank : undefined}
+                rank={
+                  submittedRank >= 1 && submittedRank <= 3
+                    ? submittedRank
+                    : undefined
+                }
                 saveState={photoSaveState}
                 onSave={saveTeamPhoto}
                 autoStart
@@ -1244,9 +1282,16 @@ export default function ScreenPage() {
               />
             </div>
             <div className="mt-6 flex items-center gap-3 rounded-2xl border border-[#e56b35]/25 bg-[#fff1e7] px-5 py-3 text-left">
-              <Clock3 className="size-5 shrink-0 text-[#e56b35]" aria-hidden="true" />
-              <span className="text-sm font-bold text-[#5b7068]">New room code appears automatically in</span>
-              <strong className="font-mono text-xl text-[#a44a22]">{formatTime(nextRoomRemaining)}</strong>
+              <Clock3
+                className="size-5 shrink-0 text-[#e56b35]"
+                aria-hidden="true"
+              />
+              <span className="text-sm font-bold text-[#5b7068]">
+                New room code appears automatically in
+              </span>
+              <strong className="font-mono text-xl text-[#a44a22]">
+                {formatTime(nextRoomRemaining)}
+              </strong>
             </div>
             <Button
               className="mt-4 h-13 rounded-2xl bg-white px-7 font-bold text-[#151722] hover:bg-white/90"
@@ -1323,7 +1368,7 @@ function HostShell({
       <div
         className={`mx-auto flex min-h-[calc(100dvh-2rem)] max-w-[1900px] flex-col gap-4 sm:min-h-[calc(100dvh-3rem)] ${lockViewport ? "lg:h-[calc(100dvh-3rem)]" : ""}`}
       >
-        <header className="flex shrink-0 items-center justify-between px-1">
+        {/* <header className="flex shrink-0 items-center justify-between px-1">
           <div className="flex items-center gap-3">
             <span className="keep-white flex size-11 items-center justify-center rounded-2xl bg-[#e56b35] text-white shadow-sm">
               <Gamepad2 className="size-6" />
@@ -1335,20 +1380,7 @@ function HostShell({
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            {(status === "connecting" || status === "reconnecting") && (
-              <LoaderCircle className="size-4 animate-spin text-white/40" />
-            )}
-            {status === "error" && <WifiOff className="size-4 text-red-500" />}
-            <span className="hidden items-center gap-1.5 text-sm text-white/40 sm:flex">
-              <Clock3 className="size-4" />
-              code {formatTime(roomRemaining)}
-            </span>
-            <strong className="rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 font-mono text-lg tracking-[.18em]">
-              {roomCode || "------"}
-            </strong>
-          </div>
-        </header>
+        </header> */}
         {children}
       </div>
     </main>
@@ -1438,7 +1470,10 @@ function QuestionStage({
           </div>
         </div>
         {hint && (
-          <div role="status" className="mt-5 flex shrink-0 items-center gap-3 rounded-2xl border border-[#e56b35]/30 bg-[#fff1e7] px-5 py-4 text-lg">
+          <div
+            role="status"
+            className="mt-5 flex shrink-0 items-center gap-3 rounded-2xl border border-[#e56b35]/30 bg-[#fff1e7] px-5 py-4 text-lg"
+          >
             <Lightbulb className="size-6 shrink-0 text-[#e56b35]" />
             <p>
               <strong>{hint.answerLabel}</strong> goes in position{" "}
@@ -1492,7 +1527,10 @@ function QuestionStage({
           })}
         </div>
         <div className="mt-3 flex min-h-10 shrink-0 items-center gap-3 border-t border-white/10 pt-3">
-          <div className="flex shrink-0 items-center pl-1" aria-label={`${players.length} players connected`}>
+          <div
+            className="flex shrink-0 items-center pl-1"
+            aria-label={`${players.length} players connected`}
+          >
             {players.slice(0, 5).map((player, index) => (
               <span
                 key={player.playerId}
@@ -1510,7 +1548,8 @@ function QuestionStage({
             )}
           </div>
           <strong className="truncate text-sm">
-            {players.length} {players.length === 1 ? "player" : "players"} connected
+            {players.length} {players.length === 1 ? "player" : "players"}{" "}
+            connected
           </strong>
           <span className="ml-auto flex items-center gap-2 text-sm text-white/35">
             <MousePointer2 className="size-4" />
