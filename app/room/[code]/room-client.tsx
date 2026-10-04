@@ -682,10 +682,10 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     const isMemorising = gameState.phase === "memorise";
     const isChinese = gameState.language === "zh";
     const title = isMemorising
-      ? isChinese ? "一起阅读、背诵并记忆" : "Memorise together"
+      ? "Memorise together / 一起阅读与记忆"
       : gameState.phase === "language"
         ? "Choose the language / 选择语言"
-        : isChinese ? "选择挑战" : "Choose the challenge";
+        : "Choose the challenge / 选择挑战";
     const description = isMemorising
       ? isChinese
         ? "请阅读或背诵共享屏幕上的经文。45 秒后将自动开始答题。"
@@ -711,29 +711,29 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           <span className="player-eyebrow mt-7">
             {gameState.challengeLabel ?? (isChinese ? "队伍选择" : "Team selection")}
           </span>
-          <h1 className="mt-3 text-4xl font-black tracking-[-.04em]">
+          <h1 className="mt-3 text-4xl font-black leading-tight tracking-[-.04em] sm:text-5xl">
             {title}
           </h1>
-          <p className="mt-4 max-w-sm leading-relaxed text-[#696c76]">
+          <p className="mt-4 max-w-sm text-xl leading-relaxed text-[#555963]">
             {description}
           </p>
 
           {!isMemorising && (
             <Button
               variant="outline"
-              className="mt-7 h-12 rounded-2xl border-black/10 bg-white px-6 font-bold"
+              className="mt-7 h-auto min-h-14 rounded-2xl border-black/10 bg-white px-6 py-3 text-lg font-bold"
               onClick={recenter}
             >
               <Crosshair className="mr-1 size-5 text-[#15a97b]" />
-              {isChinese ? "重新校准光标" : "Recenter cursor"}
+              {isChinese ? "重新校准光标 / Recenter cursor" : "Recenter cursor / 重新校准光标"}
             </Button>
           )}
 
-          <div className="mt-7 flex items-center gap-2 rounded-full border border-black/8 bg-white px-4 py-2.5 text-sm font-semibold shadow-sm">
+          <div className="mt-7 flex items-center gap-2 rounded-full border border-black/8 bg-white px-4 py-2.5 text-base font-semibold shadow-sm">
             <span
               className={`size-2 rounded-full ${sensorStatus === "active" ? "bg-[#15a97b]" : "bg-amber-500"}`}
             />
-            {sensorStatus === "active" ? "AirMouse is live" : "Motion is off"}
+            {sensorStatus === "active" ? "AirMouse is live · 体感控制已开启" : "Motion is off · 体感控制未开启"}
           </div>
         </div>
       </PhoneShell>
@@ -756,21 +756,23 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           </span>
         </div>
 
-        <h1 className="mt-6 text-balance text-2xl font-black leading-[1.04] tracking-[-.04em]">
-          Fill in the passage
+        <h1 className="mt-6 text-balance text-3xl font-black leading-tight tracking-[-.04em] sm:text-4xl">
+          Fill in the passage / 填空补全经文
         </h1>
-        <p className="mt-2 text-sm leading-relaxed text-[#6d707a]">
-          {question.instruction} Wrong placements stay on screen, so pick them
-          up again to move them.
+        <p className="mt-2 text-lg leading-relaxed text-[#555963]">
+          {question.instruction}
+        </p>
+        <p className="mt-1 text-base leading-relaxed text-[#696c76]">
+          Wrong answers stay on screen. Pick them up to move them. / 放错的答案会留在屏幕上，请重新拿起并移动。
         </p>
 
         <div className="my-6 flex flex-1 flex-col">
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-2xl border border-black/8 bg-white/70 p-4">
               <Move3d className="size-5 text-[#5c7cfa]" />
-              <p className="mt-3 text-sm font-black">Point to aim</p>
-              <p className="mt-1 text-xs leading-relaxed text-[#858790]">
-                Orientation tracking
+              <p className="mt-3 text-lg font-black">Point to aim / 指向以移动</p>
+              <p className="mt-1 text-base leading-relaxed text-[#696c76]">
+                Orientation tracking / 方向感应控制
               </p>
             </div>
             <button
@@ -779,9 +781,9 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
               onClick={recenter}
             >
               <Crosshair className="size-5 text-[#15a97b]" />
-              <p className="mt-3 text-sm font-black">Recenter</p>
-              <p className="mt-1 text-xs leading-relaxed text-[#858790]">
-                Reset cursor position
+              <p className="mt-3 text-lg font-black">Recenter / 重新校准</p>
+              <p className="mt-1 text-base leading-relaxed text-[#696c76]">
+                Reset cursor position / 重置光标位置
               </p>
             </button>
           </div>
@@ -789,8 +791,8 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           <div className="flex flex-1 items-center justify-center py-6">
             <button
               type="button"
-              aria-label="Hold to grab an answer card and release to drop it"
-              className={`flex aspect-square w-full max-w-[260px] touch-none select-none flex-col items-center justify-center rounded-full border-[10px] font-black shadow-[0_24px_60px_rgba(23,25,34,.18)] transition active:scale-[.97] ${
+              aria-label="Hold to grab an answer card and release to drop it / 按住拿起答案卡片，松开放下"
+              className={`flex aspect-square w-full max-w-[300px] touch-none select-none flex-col items-center justify-center rounded-full border-[10px] font-black shadow-[0_24px_60px_rgba(23,25,34,.18)] transition active:scale-[.97] ${
                 isHolding
                   ? "border-[#ffb29f] bg-[#ff6b4a] text-white"
                   : "border-white bg-[#171922] text-white"
@@ -824,11 +826,14 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
               ) : (
                 <TbHandStop className="size-16" aria-hidden="true" />
               )}
-              <span className="mt-3 text-xl">
+              <span className="mt-3 text-2xl">
                 {isHolding ? "Release to drop" : "Hold to grab"}
               </span>
-              <span className="mt-1 text-xs font-semibold opacity-50">
-                Watch your cursor on screen
+              <span className="mt-1 text-lg font-semibold">
+                {isHolding ? "松开放下" : "按住拿起"}
+              </span>
+              <span className="mt-2 px-5 text-center text-sm font-semibold opacity-70">
+                Watch the cursor on screen / 请看屏幕上的光标
               </span>
             </button>
           </div>
@@ -853,7 +858,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           <div className="mt-3 flex items-center gap-3 rounded-2xl bg-[#fff4cf] p-4 text-[#755509]">
             <Sparkles className="size-5" />
             <p className="font-black">
-              Passage complete! Look at the screen for the final time.
+              Passage complete! Look at the screen for the final time. / 经文填完了！请查看大屏上的最终用时。
             </p>
           </div>
         )}

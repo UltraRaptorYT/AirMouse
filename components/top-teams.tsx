@@ -72,9 +72,9 @@ export function TopTeams({ entries }: { entries: LeaderboardEntry[] }) {
   return (
     <section className="host-panel p-4 sm:p-5">
       <h2 className="flex items-center gap-2 text-xl font-black">
-        <Trophy className="size-5 text-[#e56b35]" /> Top 3 teams
+        <Trophy className="size-5 text-[#e56b35]" /> Top 3 teams · 排名前三的队伍
       </h2>
-      <p className="mt-1 text-xs text-white/45">All-time fastest teams · top three per challenge</p>
+      <p className="mt-1 text-sm text-white/55">All-time fastest teams · 每项挑战的历史前三名</p>
       <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {challenges.map((challenge) => {
           const teams = rankTeams(entries.filter((entry) => entry.challengeId === challenge.id)).slice(0, 3);
@@ -83,7 +83,7 @@ export function TopTeams({ entries }: { entries: LeaderboardEntry[] }) {
               <h3 className="text-sm font-black">{challenge.label}</h3>
               <p className="mb-2 text-[11px] text-white/40">{challenge.source}</p>
               {teams.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-black/10 p-3 text-xs text-white/40">No times yet — be the first team!</p>
+                <p className="rounded-lg border border-dashed border-black/10 p-3 text-sm text-white/55">No times yet · 暂无成绩，来争取第一名！</p>
               ) : (
                 <ol className="space-y-1.5">
                   {teams.map((entry, index) => {
@@ -112,7 +112,7 @@ export function TopTeams({ entries }: { entries: LeaderboardEntry[] }) {
 
 export function HomeTopTeams() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
-  const [status, setStatus] = useState("Loading top teams…");
+  const [status, setStatus] = useState("Loading top teams… · 正在加载队伍排名…");
   useEffect(() => {
     const controller = new AbortController();
     async function refresh() {
@@ -126,7 +126,7 @@ export function HomeTopTeams() {
         setEntries(data.entries);
         setStatus("");
       } catch {
-        if (!controller.signal.aborted) setStatus("Top teams are temporarily unavailable. Retrying shortly…");
+        if (!controller.signal.aborted) setStatus("Top teams are temporarily unavailable. Retrying shortly… · 排名暂不可用，稍后重试…");
       }
     }
     void refresh();

@@ -1116,17 +1116,17 @@ export default function ScreenPage() {
     const languageStep = gameState.phase === "language";
     const choices = languageStep
       ? [
-          { value: "en", title: "English", subtitle: "English questions" },
+          { value: "en", title: "English", subtitle: "English questions · 英文题目" },
           {
             value: "zh",
             title: "中文",
-            subtitle: "中文题目 / Mandarin Chinese",
+            subtitle: "中文题目 · Mandarin Chinese questions",
           },
         ]
       : [
           {
             value: "1",
-            title: gameState.language === "zh" ? "挑战一" : "Challenge 1",
+            title: gameState.language === "zh" ? "挑战一" : "Challenge 1 · 挑战一",
             subtitle:
               gameState.language === "zh"
                 ? "《十法经》"
@@ -1134,7 +1134,7 @@ export default function ScreenPage() {
           },
           {
             value: "2",
-            title: gameState.language === "zh" ? "挑战二" : "Challenge 2",
+            title: gameState.language === "zh" ? "挑战二" : "Challenge 2 · 挑战二",
             subtitle:
               gameState.language === "zh"
                 ? "《华严经》"
@@ -1156,14 +1156,14 @@ export default function ScreenPage() {
                   ? "第二步，共两步"
                   : "Step 2 of 2"}
             </span>
-            <h1 className="mt-4 text-4xl font-black tracking-[-.04em] sm:text-6xl">
+            <h1 className="mt-4 text-5xl font-black tracking-[-.04em] sm:text-7xl">
               {languageStep
                 ? "Choose a language · 选择语言"
                 : gameState.language === "zh"
                   ? "选择挑战"
-                  : "Choose a challenge"}
+                  : "Choose a challenge · 选择挑战"}
             </h1>
-            <p className="mt-3 text-lg text-white/50">
+            <p className="mt-3 text-2xl leading-relaxed text-white/75 sm:text-3xl">
               {languageStep
                 ? "Move a cursor into a zone and hold for 5 seconds to confirm. / 将光标移入选项区域并停留 5 秒，即可确认。"
                 : gameState.language === "zh"
@@ -1178,15 +1178,15 @@ export default function ScreenPage() {
                 <div
                   key={choice.value}
                   data-choice={choice.value}
-                  className={`relative flex min-h-64 flex-col items-center justify-center overflow-hidden rounded-[2rem] border-2 text-center transition ${active ? "border-[#44d79b] bg-[#44d79b]/14" : "border-dashed border-white/20 bg-white/[.04]"}`}
+                  className={`relative flex min-h-64 flex-col items-center justify-center overflow-hidden rounded-[2rem] border-2 px-5 text-center transition ${active ? "border-[#44d79b] bg-[#44d79b]/14" : "border-dashed border-white/20 bg-white/[.04]"}`}
                 >
                   <Languages
                     className={`size-10 ${active ? "text-[#44d79b]" : "text-[#ff8b70]"}`}
                   />
-                  <strong className="mt-5 text-4xl font-black">
+                  <strong className="mt-5 text-5xl font-black sm:text-6xl">
                     {choice.title}
                   </strong>
-                  <span className="mt-2 text-base text-white/45">
+                  <span className="mt-2 text-xl leading-relaxed text-white/65 sm:text-2xl">
                     {choice.subtitle}
                   </span>
                   <div className="absolute inset-x-0 bottom-0 h-3 bg-white/8">
@@ -1198,7 +1198,7 @@ export default function ScreenPage() {
                     />
                   </div>
                   {active && (
-                    <span className="mt-5 font-mono text-sm font-bold text-[#44d79b]">
+                    <span className="mt-5 font-mono text-2xl font-bold text-[#44d79b]">
                       {gameState.language === "zh" ? "保持 " : "Hold "}
                       {Math.max(1, Math.ceil(5 - dwell.progress * 5))}
                       {gameState.language === "zh" ? " 秒" : "s"}
@@ -1240,7 +1240,7 @@ export default function ScreenPage() {
               : "Read, recite and memorise"}
           </h1>
           <p
-            className={`mt-8 max-w-6xl text-balance font-semibold leading-[1.75] text-white/80 ${gameState.language === "zh" ? "text-5xl" : "text-xl sm:text-3xl"}`}
+            className={`mt-8 max-w-6xl text-balance font-semibold leading-[1.65] text-white/85 ${gameState.language === "zh" ? "text-[clamp(2.4rem,4vw,4rem)]" : "text-[clamp(2rem,3.4vw,3.5rem)]"}`}
           >
             {gameState.memoriseText}
           </p>
@@ -1541,7 +1541,7 @@ function QuestionStage({
           </div>
         )}
         <div
-          className={`mt-4 shrink-0 grow text-balance font-semibold text-white/85 ${isChinese ? "text-[clamp(1.4rem,1.8vw,2.2rem)] leading-[2.1]" : "text-2xl leading-[2.05]"}`} // text-[clamp(1.05rem,1.35vw,1.6rem)]
+          className={`mt-4 shrink-0 grow text-balance font-semibold leading-[1.8] text-white/90 ${isChinese ? "text-[clamp(1.9rem,2.8vw,3.1rem)]" : "text-[clamp(1.8rem,2.6vw,3rem)]"}`}
         >
           {tokens.map((token, index) => {
             const match = token.match(/^\[(\d+)\]$/);
@@ -1560,7 +1560,7 @@ function QuestionStage({
               <span
                 key={target.id}
                 data-answer-target={target.id}
-                className={`mx-1 inline-flex min-h-[clamp(2.5rem,4.5vh,3.5rem)] min-w-28 max-w-[calc(100%-0.5rem)] items-center justify-center rounded-xl border-2 px-2 py-1 align-middle text-center ${hinted ? "border-[#e56b35] bg-[#fff1e7] ring-4 ring-[#e56b35]/15" : answer ? "border-transparent" : "border-dashed border-white/25 bg-white/[.05]"}`}
+                className={`mx-1 inline-flex min-h-[clamp(3.2rem,5.5vh,4.5rem)] min-w-36 max-w-[calc(100%-0.5rem)] items-center justify-center rounded-xl border-2 px-3 py-2 align-middle text-center ${hinted ? "border-[#e56b35] bg-[#fff1e7] ring-4 ring-[#e56b35]/15" : answer ? "border-transparent" : "border-dashed border-white/25 bg-white/[.05]"}`}
               >
                 {answer ? (
                   <span
@@ -1574,7 +1574,7 @@ function QuestionStage({
                     {answer.label}
                   </span>
                 ) : (
-                  <span className="font-mono text-base text-white/30">
+                  <span className="font-mono text-xl text-white/45">
                     [{target.label}]
                   </span>
                 )}
@@ -1615,10 +1615,10 @@ function QuestionStage({
       </section>
       <aside className="host-panel flex min-h-0 min-w-0 flex-col overflow-auto p-5">
         <div className="shrink-0">
-          <span className="eyebrow">Phrase bank</span>
-          <h2 className="mt-2 text-2xl font-black">Choose a phrase</h2>
-          <p className="mt-1 text-sm text-white/45">
-            Grab a phrase, then release it over the matching position.
+          <span className="eyebrow">Phrase bank · 词组库</span>
+          <h2 className="mt-2 text-3xl font-black">Choose a phrase · 选择词组</h2>
+          <p className="mt-1 text-lg leading-relaxed text-white/65">
+            Grab a phrase, then release it over the matching position. / 拿起词组，松开放到对应位置。
           </p>
         </div>
         <div
@@ -1629,9 +1629,9 @@ function QuestionStage({
             <Lightbulb className="size-6" />
           </span>
           <span className="min-w-0 flex-1">
-            <strong className="block text-lg">Show position</strong>
-            <span className="block text-sm text-white/45">
-              Drop a phrase here to reveal its position
+            <strong className="block text-xl">Show position · 查看位置</strong>
+            <span className="block text-base leading-relaxed text-white/60">
+              Drop a phrase here to reveal its position / 把词组放在这里可查看它的位置
             </span>
           </span>
           <span className="shrink-0 rounded-lg bg-white px-3 py-2 text-sm font-black text-[#a44a22]">
@@ -1643,7 +1643,7 @@ function QuestionStage({
             <div
               key={answer.id}
               data-answer-card={answer.id}
-              className="flex min-h-12 cursor-none items-center rounded-xl border border-black/8 bg-white px-3 py-2 text-[clamp(.8rem,1vw,1rem)] font-black leading-tight text-[#191b26] shadow-sm"
+              className="flex min-h-16 cursor-none items-center rounded-xl border border-black/8 bg-white px-3 py-3 text-[clamp(1.1rem,1.2vw,1.5rem)] font-black leading-snug text-[#191b26] shadow-sm"
             >
               <TbHandGrab className="mr-2 size-6 shrink-0 text-[#e56b35]" />
               {answer.label}
@@ -1652,13 +1652,12 @@ function QuestionStage({
           {complete && (
             <div className="col-span-full rounded-2xl bg-[#dff5e8] p-5 text-lg font-bold text-[#087653]">
               <Check className="mr-2 inline size-6" />
-              Passage complete
+              Passage complete · 经文填完了
             </div>
           )}
           {!complete && poolAnswers.length === 0 && (
             <p className="col-span-full rounded-2xl bg-[#fff1e7] p-4 text-base font-semibold text-[#9a3f17]">
-              Every phrase is placed. Move the orange ones to a different
-              position.
+              Every phrase is placed. Move the orange ones to a different position. / 所有词组都已放置。请移动橙色词组到其他位置。
             </p>
           )}
         </div>
