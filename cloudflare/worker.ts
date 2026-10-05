@@ -243,10 +243,6 @@ export class Leaderboard extends DurableObject<Env> {
     return null;
   }
 
-  async photoDetails(runId: string): Promise<R2ObjectBody | null> {
-    return this.env.PHOTOS.get(`photos/leaderboard/${runId}.jpg`);
-  }
-
   async legacyPhotoDetails(runId: string): Promise<{ photo: string; createdAt: number } | undefined> {
     const photo = await this.ctx.storage.get<string>(`photo:${runId}`);
     if (!photo) return undefined;
@@ -630,7 +626,7 @@ export default {
       const id = photoMatch[1];
       const object = id.startsWith("s-")
         ? await env.PHOTOS.get(`photos/shared/${id}.jpg`)
-        : await env.LEADERBOARD.getByName(LEADERBOARD_ID).photoDetails(id);
+        : await env.PHOTOS.get(`photos/leaderboard/${id}.jpg`);
       if (object) {
         const createdAt = Number(object.customMetadata?.createdAt) || object.uploaded.getTime();
         const headers = new Headers();
