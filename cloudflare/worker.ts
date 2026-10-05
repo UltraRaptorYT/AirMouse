@@ -21,6 +21,7 @@ interface Env {
   LEADERBOARD: DurableObjectNamespace<Leaderboard>;
   SHARED_PHOTOS: DurableObjectNamespace<SharedPhoto>;
   PHOTOS: R2Bucket;
+  LEADERBOARD_ADMIN_TOKEN?: string;
   ALLOWED_ORIGINS?: string;
 }
 
@@ -37,6 +38,21 @@ function jsonResponse(body: unknown, status = 200) {
     status,
     headers: { "cache-control": "no-store" },
   });
+}
+
+async function matchesAdminToken(provided: string, expected: string) {
+  const encoder = new TextEncoder();
+  const [providedDigest, expectedDigest] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(provided)),
+    crypto.subtle.digest("SHA-256", encoder.encode(expected)),
+  ]);
+  const providedBytes = new Uint8Array(providedDigest);
+  const expectedBytes = new Uint8Array(expectedDigest);
+  let difference = 0;
+  for (let index = 0; index < expectedBytes.length; index += 1) {
+    difference |= providedBytes[index] ^ expectedBytes[index];
+  }
+  return difference === 0;
 }
 
 function photoDownloadFileName(timestamp: number) {
@@ -176,6 +192,12 @@ function sanitizeLeaderboardEntry(value: unknown): LeaderboardEntry | null {
 export class Leaderboard extends DurableObject<Env> {
   async list(): Promise<LeaderboardEntry[]> {
     return (await this.ctx.storage.get<LeaderboardEntry[]>("entries")) ?? [];
+  }
+
+  async clear(): Promise<number> {
+    const entryCount = (await this.list()).length;
+    await this.ctx.storage.deleteAll();
+    return entryCount;
   }
 
   async submit(entry: LeaderboardEntry, ownerId: string): Promise<LeaderboardEntry[]> {
@@ -574,6 +596,66 @@ export default {
       // The leaderboard is public; allow the home page to read it across origins.
       response.headers.set("access-control-allow-origin", "*");
       return response;
+    }
+
+    const adminResetPath = "/leaderboard/admin/reset";
+    if (url.pathname === adminResetPath && request.method === "OPTIONS") {
+      if (!isOriginAllowed(request, env.ALLOWED_ORIGINS)) {
+        return jsonResponse({ error: "Origin not allowed" }, 403);
+      }
+      return new Response(null, { status: 204, headers: {
+        "access-control-allow-origin": request.headers.get("origin") ?? "*",
+        "access-control-allow-methods": "POST, OPTIONS",
+        "access-control-allow-headers": "authorization, content-type",
+        "access-control-max-age": "86400",
+        vary: "Origin",
+      } });
+    }
+    if (url.pathname === adminResetPath && request.method === "POST") {
+      const origin = request.headers.get("origin");
+      if (!isOriginAllowed(request, env.ALLOWED_ORIGINS)) {
+        return jsonResponse({ error: "Origin not allowed" }, 403);
+      }
+      const respond = (body: unknown, status = 200) => {
+        const response = jsonResponse(body, status);
+        response.headers.set("access-control-allow-origin", origin ?? "*");
+        response.headers.set("vary", "Origin");
+        return response;
+      };
+      const expectedToken = env.LEADERBOARD_ADMIN_TOKEN;
+      if (!expectedToken || expectedToken.length < 32) {
+        return respond({ error: "Leaderboard admin is not configured on the Worker." }, 503);
+      }
+      const authorization = request.headers.get("authorization") ?? "";
+      const providedToken = authorization.startsWith("Bearer ")
+        ? authorization.slice("Bearer ".length)
+        : "";
+      if (!(await matchesAdminToken(providedToken, expectedToken))) {
+        return respond({ error: "Invalid admin token." }, 401);
+      }
+      let body: { confirmation?: unknown };
+      try {
+        body = await request.json() as { confirmation?: unknown };
+      } catch {
+        return respond({ error: "Confirm the reset and try again." }, 400);
+      }
+      if (body.confirmation !== "CLEAR LEADERBOARD") {
+        return respond({ error: "Type CLEAR LEADERBOARD to confirm." }, 400);
+      }
+
+      let deletedPhotos = 0;
+      let cursor: string | undefined;
+      do {
+        const page = await env.PHOTOS.list({ prefix: "photos/leaderboard/", cursor });
+        if (page.objects.length > 0) {
+          await env.PHOTOS.delete(page.objects.map((object) => object.key));
+          deletedPhotos += page.objects.length;
+        }
+        cursor = page.truncated ? page.cursor : undefined;
+      } while (cursor);
+
+      const deletedEntries = await env.LEADERBOARD.getByName(LEADERBOARD_ID).clear();
+      return respond({ ok: true, deletedEntries, deletedPhotos });
     }
 
     const sharePath = "/leaderboard/photos/share";

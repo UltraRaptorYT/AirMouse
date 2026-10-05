@@ -121,3 +121,19 @@ the [Cloudflare Durable Objects pricing documentation](https://developers.cloudf
 - Open **Cloudflare Dashboard → R2 object storage → mrd-group-photos** to browse
   and download the original photo files. Each object includes its capture time
   and, for leaderboard photos, the team and challenge in its custom metadata.
+
+## Admin leaderboard reset
+
+The `/admin` page can clear all fastest-team scores and archived leaderboard
+photos. It keeps shared photo downloads. The reset endpoint requires a Worker
+secret; the token is entered on the admin page and is not saved by the site.
+
+1. Open **Cloudflare Dashboard → Workers & Pages → airmouse-realtime → Settings
+   → Variables and Secrets**.
+2. Add a secret named `LEADERBOARD_ADMIN_TOKEN`. Use a unique, randomly
+   generated value with at least 32 characters, then save/deploy the Worker.
+3. Open `https://bwm-air-mouse.vercel.app/admin`, enter the same token, type
+   `CLEAR LEADERBOARD`, and submit.
+
+The reset deletes all entries in the global leaderboard Durable Object and
+objects under `photos/leaderboard/` in R2. It does not delete `photos/shared/`.
