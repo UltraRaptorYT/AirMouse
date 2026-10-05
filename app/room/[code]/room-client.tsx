@@ -556,6 +556,37 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     );
   }
 
+  if (gameState.phase === "finished" && gameState.timedOut) {
+    return (
+      <PhoneShell roomCode={roomCode} status={status} score={totalScore}>
+        <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
+          <div className="flex size-20 items-center justify-center rounded-[1.7rem] bg-[#e56b35] text-white shadow-[0_18px_50px_rgba(216,155,34,.25)]">
+            <Trophy className="size-9" />
+          </div>
+          <span className="player-eyebrow mt-7">
+            {isChinese ? "挑战已结束" : "Challenge ended"}
+          </span>
+          <h1 className="mt-3 text-4xl font-black tracking-[-.05em] sm:text-5xl">
+            {isChinese ? "挑战未完成" : "Challenge not completed"}
+          </h1>
+          <p className="mt-4 max-w-sm text-[#6b6e78]">
+            {isChinese
+              ? "配对时间已达 20 分钟上限。请查看大屏上的队伍合影。"
+              : "The 20-minute matching limit was reached. See the host screen for your team photo."}
+          </p>
+          <div className="mt-8 rounded-2xl border border-black/8 bg-white px-8 py-5 shadow-sm">
+            <p className="text-xs font-bold uppercase tracking-[.18em] text-[#9a9ca3]">
+              {isChinese ? "本场得分" : "Score this game"}
+            </p>
+            <p className="mt-1 font-mono text-4xl font-black">
+              {totalScore.toLocaleString()}
+            </p>
+          </div>
+        </div>
+      </PhoneShell>
+    );
+  }
+
   if (gameState.phase === "finished") {
     return (
       <PhoneShell roomCode={roomCode} status={status} score={totalScore}>
@@ -641,7 +672,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
           <div className="mt-5 flex items-center gap-2 rounded-full border border-black/8 bg-white px-4 py-2.5 text-sm font-semibold shadow-sm">
             <LoaderCircle className="size-4 animate-spin text-[#ff6b4a]" />
-            {isChinese ? "等待主持人开始" : "Waiting for the host"}
+            {isChinese ? "将光标移入开始区域以开始" : "Hover to the start zone to begin"}
           </div>
 
           {sensorStatus !== "active" && (
@@ -692,10 +723,10 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
         ? "请阅读或背诵共享屏幕上的经文。45 秒后将自动开始答题。"
         : "Read or recite the passage on the shared screen. The questions begin automatically after 45 seconds."
       : gameState.phase === "language"
-        ? "Steer your cursor into a choice zone and hold for 5 seconds. / 将光标移入选项区域并停留 5 秒。"
+        ? "A majority of players must stay in one option for 5 seconds. / 多数玩家需同时停留在同一选项 5 秒。"
         : isChinese
-          ? "将你的彩色光标移入共享屏幕上的选项区域，并停留 5 秒。"
-          : "Steer your colored cursor into a choice zone on the shared screen and keep it there for 5 seconds.";
+          ? "多数玩家需同时停留在共享屏幕上的同一选项 5 秒。"
+          : "A majority of players must stay in the same option on the shared screen for 5 seconds.";
 
     return (
       <PhoneShell roomCode={roomCode} status={status} score={totalScore}>

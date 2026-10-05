@@ -29,6 +29,7 @@ export type GameStatePayload = {
   startedAt?: number;
   penaltyMs?: number;
   completedAt?: number;
+  timedOut?: boolean;
 };
 
 export type CursorMovePayload = {

@@ -53,7 +53,7 @@ type ConnectionStatus = "connecting" | "ready" | "reconnecting" | "error";
 type ScoreEntry = { name: string; score: number };
 type CursorPosition = { x: number; y: number };
 type SolvedAnswer = { targetId: string; playerId: string; correct: boolean };
-type DwellState = { value: string; playerId: string; progress: number } | null;
+type DwellState = { value: string; progress: number } | null;
 type HintState = {
   answerId: string;
   answerLabel: string;
@@ -66,11 +66,10 @@ type RegisterCursor = (
 
 const FALLBACK_COLOR = "#ff6b4a";
 const PLAYER_DISCONNECT_GRACE_MS = 15_000;
-const ROOM_TTL_MS = 20 * 60 * 1_000;
+const MATCH_LIMIT_MS = 20 * 60 * 1_000;
 const CHOICE_DWELL_MS = 5_000;
 const START_DWELL_MS = 2_000;
 const MEMORISE_MS = 45_000;
-const NEXT_ROOM_DELAY_MS = 45_000;
 // Per-frame interpolation toward the latest aim. 1 = snap instantly, lower = smoother but laggier.
 const CURSOR_LERP = 0.6;
 const CURSOR_SNAP_PX = 0.5;
@@ -141,7 +140,6 @@ function formatTeamName(players: PlayerPresence[]) {
 export default function ScreenPage() {
   const [roomCode, setRoomCode] = useState("");
   const [roomUrl, setRoomUrl] = useState("");
-  const [roomExpiresAt, setRoomExpiresAt] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [players, setPlayers] = useState<PlayerPresence[]>([]);
@@ -151,6 +149,7 @@ export default function ScreenPage() {
     Record<string, SolvedAnswer>
   >({});
   const [dwell, setDwell] = useState<DwellState>(null);
+  const [choiceVotes, setChoiceVotes] = useState<Record<string, number>>({});
   const [startReadyPlayerIds, setStartReadyPlayerIds] = useState<string[]>([]);
   const [startProgress, setStartProgress] = useState(0);
   const [hint, setHint] = useState<HintState>(null);
@@ -182,7 +181,6 @@ export default function ScreenPage() {
   const solvedAnswersRef = useRef(solvedAnswers);
   const selectionRef = useRef<{
     value: string;
-    playerId: string;
     startedAt: number;
   } | null>(null);
   const selectionLockedRef = useRef(false);
@@ -288,7 +286,6 @@ export default function ScreenPage() {
     renderedCursorsRef.current = {};
     setRoomCode(code);
     setRoomUrl(`${window.location.origin}/room/${code}`);
-    setRoomExpiresAt(Date.now() + ROOM_TTL_MS);
   }, [resetSession]);
 
   useEffect(() => {
@@ -297,26 +294,9 @@ export default function ScreenPage() {
   }, [openFreshRoom]);
 
   useEffect(() => {
-    if (gameState.phase !== "finished") return;
-    const deadline = (gameState.completedAt ?? Date.now()) + NEXT_ROOM_DELAY_MS;
-    const timer = window.setTimeout(
-      openFreshRoom,
-      Math.max(0, deadline - Date.now()),
-    );
-    return () => window.clearTimeout(timer);
-  }, [gameState.completedAt, gameState.phase, openFreshRoom]);
-
-  useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 250);
     return () => window.clearInterval(timer);
   }, []);
-
-  useEffect(() => {
-    if (!roomExpiresAt || now < roomExpiresAt || gameState.phase !== "lobby")
-      return;
-    const timer = window.setTimeout(openFreshRoom, 0);
-    return () => window.clearTimeout(timer);
-  }, [gameState.phase, now, openFreshRoom, roomExpiresAt]);
 
   const broadcastState = useCallback((nextState: GameStatePayload) => {
     gameStateRef.current = nextState;
@@ -346,6 +326,18 @@ export default function ScreenPage() {
     [broadcastState, clearRound],
   );
 
+  const finishTimedOutMatch = useCallback(() => {
+    const current = gameStateRef.current;
+    if (current.phase !== "question" || !current.startedAt) return;
+    broadcastState({
+      ...current,
+      phase: "finished",
+      question: undefined,
+      completedAt: Date.now(),
+      timedOut: true,
+    });
+  }, [broadcastState]);
+
   useEffect(() => {
     if (gameState.phase !== "memorise" || !gameState.phaseEndsAt) return;
     const timer = window.setTimeout(
@@ -355,6 +347,16 @@ export default function ScreenPage() {
     );
     return () => window.clearTimeout(timer);
   }, [gameState.phase, gameState.phaseEndsAt, startQuestion]);
+
+  useEffect(() => {
+    if (gameState.phase !== "question" || !gameState.startedAt) return;
+    const timeoutAt = gameState.startedAt + MATCH_LIMIT_MS;
+    const timer = window.setTimeout(
+      finishTimedOutMatch,
+      Math.max(0, timeoutAt - Date.now()),
+    );
+    return () => window.clearTimeout(timer);
+  }, [finishTimedOutMatch, gameState.phase, gameState.startedAt]);
 
   useEffect(() => {
     if (!roomCode) return;
@@ -737,6 +739,7 @@ export default function ScreenPage() {
   useEffect(() => {
     selectionRef.current = null;
     selectionLockedRef.current = false;
+    setChoiceVotes({});
     const clearDwellTimer = window.setTimeout(() => setDwell(null), 0);
     if (gameState.phase !== "language" && gameState.phase !== "challenge") {
       return () => window.clearTimeout(clearDwellTimer);
@@ -758,43 +761,43 @@ export default function ScreenPage() {
           );
         });
         return zone?.dataset.choice
-          ? [{ playerId: player.playerId, value: zone.dataset.choice }]
+          ? [{ value: zone.dataset.choice }]
           : [];
       });
+      const votesByChoice: Record<string, number> = {};
+      for (const occupant of occupants) {
+        votesByChoice[occupant.value] = (votesByChoice[occupant.value] ?? 0) + 1;
+      }
+      setChoiceVotes(votesByChoice);
+
+      const requiredVotes = Math.floor(playersRef.current.length / 2) + 1;
+      const majorityChoice = Object.entries(votesByChoice).find(
+        ([, voteCount]) => voteCount >= requiredVotes,
+      );
       const current = selectionRef.current;
-      const occupant = current
-        ? occupants.find(
-            (item) =>
-              item.playerId === current.playerId &&
-              item.value === current.value,
-          )
-        : occupants[0];
-      if (!occupant) {
+      if (!majorityChoice) {
         selectionRef.current = null;
         setDwell(null);
         return;
       }
-      const startedAt =
-        current?.playerId === occupant.playerId &&
-        current.value === occupant.value
-          ? current.startedAt
-          : Date.now();
-      selectionRef.current = { ...occupant, startedAt };
+      const [value] = majorityChoice;
+      const startedAt = current?.value === value ? current.startedAt : Date.now();
+      selectionRef.current = { value, startedAt };
       const progress = Math.min(1, (Date.now() - startedAt) / CHOICE_DWELL_MS);
-      setDwell({ ...occupant, progress });
+      setDwell({ value, progress });
       if (progress < 1 || selectionLockedRef.current) return;
       selectionLockedRef.current = true;
       if (gameStateRef.current.phase === "language") {
         broadcastState({
           phase: "challenge",
-          language: occupant.value as GameLanguage,
+          language: value as GameLanguage,
           questionIndex: 0,
           questionCount: 0,
         });
       } else {
         const challenge = getChallenge(
           gameStateRef.current.language!,
-          Number(occupant.value) as ChallengeNumber,
+          Number(value) as ChallengeNumber,
         );
         if (!challenge) return;
         broadcastState({
@@ -825,6 +828,15 @@ export default function ScreenPage() {
   useEffect(() => {
     if (!roundComplete || gameState.phase !== "question") return;
     const timer = window.setTimeout(() => {
+      const current = gameStateRef.current;
+      if (current.phase !== "question") return;
+      if (
+        current.startedAt &&
+        Date.now() >= current.startedAt + MATCH_LIMIT_MS
+      ) {
+        finishTimedOutMatch();
+        return;
+      }
       const nextIndex = gameStateRef.current.questionIndex + 1;
       if (nextIndex < gameStateRef.current.questionCount)
         startQuestion(nextIndex);
@@ -837,7 +849,7 @@ export default function ScreenPage() {
         });
     }, 1_600);
     return () => window.clearTimeout(timer);
-  }, [broadcastState, gameState.phase, roundComplete, startQuestion]);
+  }, [broadcastState, finishTimedOutMatch, gameState.phase, roundComplete, startQuestion]);
 
   const rankedPlayers = useMemo(
     () =>
@@ -852,7 +864,6 @@ export default function ScreenPage() {
         .slice(0, 5),
     [players, scores],
   );
-  const roomRemaining = Math.max(0, roomExpiresAt - now);
   const elapsed = gameState.startedAt
     ? Math.max(
         0,
@@ -866,6 +877,7 @@ export default function ScreenPage() {
   useEffect(() => {
     if (
       gameState.phase !== "finished" ||
+      gameState.timedOut ||
       submittedRunId ||
       !gameState.startedAt ||
       !gameState.completedAt ||
@@ -919,10 +931,6 @@ export default function ScreenPage() {
   const submittedRank = submittedRunId
     ? challengeLeaderboard.findIndex((entry) => entry.id === submittedRunId) + 1
     : 0;
-  const nextRoomRemaining =
-    gameState.phase === "finished" && gameState.completedAt
-      ? Math.max(0, gameState.completedAt + NEXT_ROOM_DELAY_MS - now)
-      : NEXT_ROOM_DELAY_MS;
 
   useEffect(() => {
     if (photoSaveState.status !== "saving") return;
@@ -991,7 +999,6 @@ export default function ScreenPage() {
       <HostShell
         roomCode={roomCode}
         status={status}
-        roomRemaining={roomRemaining}
       >
         <div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[minmax(0,1.25fr)_420px]">
           <section className="host-panel grid items-center gap-8 overflow-hidden p-7 md:grid-cols-[280px_1fr] md:p-9">
@@ -1032,10 +1039,6 @@ export default function ScreenPage() {
                   {status === "error" && (
                     <WifiOff className="size-4 text-red-500" />
                   )}
-                  <span className="hidden items-center gap-1.5 text-sm text-white/40 sm:flex">
-                    <Clock3 className="size-4" />
-                    code {formatTime(roomRemaining)} · 剩余时间
-                  </span>
                 </div>
                 <span className="text-base text-white/45">Room code · 房间代码</span>
                 <strong className="font-mono text-2xl tracking-[.22em]">
@@ -1046,7 +1049,7 @@ export default function ScreenPage() {
           </section>
           <section className="host-panel flex min-h-[380px] flex-col p-6">
             <div className="flex items-center justify-between">
-              <h2 className="flex items-center gap-2 text-2xl font-bold">
+              <h2 className="flex items-center gap-2 text-lg font-bold">
                 <Users className="size-6 text-[#e56b35]" />
                 {players.length} {players.length === 1 ? "player" : "players"} · {players.length} 位玩家
               </h2>
@@ -1125,17 +1128,17 @@ export default function ScreenPage() {
     const languageStep = gameState.phase === "language";
     const choices = languageStep
       ? [
-          { value: "en", title: "English", subtitle: "English questions · 英文题目" },
+          { value: "en", title: "English", subtitle: "English questions" },
           {
             value: "zh",
             title: "中文",
-            subtitle: "中文题目 · Mandarin Chinese questions",
+            subtitle: "中文题目",
           },
         ]
       : [
           {
             value: "1",
-            title: gameState.language === "zh" ? "挑战一" : "Challenge 1 · 挑战一",
+            title: gameState.language === "zh" ? "挑战一" : "Challenge 1",
             subtitle:
               gameState.language === "zh"
                 ? "《十法经》"
@@ -1143,7 +1146,7 @@ export default function ScreenPage() {
           },
           {
             value: "2",
-            title: gameState.language === "zh" ? "挑战二" : "Challenge 2 · 挑战二",
+            title: gameState.language === "zh" ? "挑战二" : "Challenge 2",
             subtitle:
               gameState.language === "zh"
                 ? "《华严经》"
@@ -1154,7 +1157,6 @@ export default function ScreenPage() {
       <HostShell
         roomCode={roomCode}
         status={status}
-        roomRemaining={roomRemaining}
       >
         <section className="host-panel flex flex-1 flex-col p-7 sm:p-10">
           <div className="text-center">
@@ -1170,19 +1172,21 @@ export default function ScreenPage() {
                 ? "Choose a language · 选择语言"
                 : gameState.language === "zh"
                   ? "选择挑战"
-                  : "Choose a challenge · 选择挑战"}
+                  : "Choose a challenge"}
             </h1>
             <p className="mt-3 text-2xl leading-relaxed text-white/75 sm:text-3xl">
               {languageStep
-                ? "Move a cursor into a zone and hold for 5 seconds to confirm. / 将光标移入选项区域并停留 5 秒，即可确认。"
+                  ? "A majority of players must stay in one option for 5 seconds. / 多数玩家需同时停留在同一选项 5 秒。"
                 : gameState.language === "zh"
-                  ? "将光标移入选项区域并停留 5 秒，即可确认。"
-                  : "Move a cursor into a zone and keep it there for 5 seconds to confirm."}
+                  ? "多数玩家需同时停留在同一选项 5 秒。"
+                  : "A majority of players must stay in one option for 5 seconds."}
             </p>
           </div>
           <div className="mt-8 grid flex-1 gap-6 md:grid-cols-2">
             {choices.map((choice) => {
               const active = dwell?.value === choice.value;
+              const voteCount = choiceVotes[choice.value] ?? 0;
+              const requiredVotes = Math.floor(players.length / 2) + 1;
               return (
                 <div
                   key={choice.value}
@@ -1198,6 +1202,13 @@ export default function ScreenPage() {
                   <span className="mt-2 text-xl leading-relaxed text-white/65 sm:text-2xl">
                     {choice.subtitle}
                   </span>
+                  <span className="mt-3 text-base font-bold text-white/60 sm:text-lg">
+                    {languageStep
+                      ? `Votes ${voteCount}/${players.length} · 投票 ${voteCount}/${players.length}`
+                      : gameState.language === "zh"
+                        ? `投票 ${voteCount}/${players.length} · 多数需 ${requiredVotes} 人`
+                        : `Votes ${voteCount}/${players.length} · majority ${requiredVotes}`}
+                  </span>
                   <div className="absolute inset-x-0 bottom-0 h-3 bg-white/8">
                     <div
                       className="h-full bg-[#44d79b] transition-[width] duration-100"
@@ -1208,7 +1219,7 @@ export default function ScreenPage() {
                   </div>
                   {active && (
                     <span className="mt-5 font-mono text-2xl font-bold text-[#44d79b]">
-                      {gameState.language === "zh" ? "保持 " : "Hold "}
+                      {gameState.language === "zh" ? "确认倒数 " : "Confirming in "}
                       {Math.max(1, Math.ceil(5 - dwell.progress * 5))}
                       {gameState.language === "zh" ? " 秒" : "s"}
                     </span>
@@ -1233,7 +1244,6 @@ export default function ScreenPage() {
       <HostShell
         roomCode={roomCode}
         status={status}
-        roomRemaining={roomRemaining}
       >
         <section className="host-panel flex flex-1 flex-col items-center justify-center overflow-hidden p-7 text-center sm:p-10">
           <div className="flex items-center gap-3">
@@ -1249,7 +1259,7 @@ export default function ScreenPage() {
               : "Read, recite and memorise"}
           </h1>
           <p
-            className={`mt-8 max-w-6xl text-balance font-semibold leading-[1.65] text-white/85 ${gameState.language === "zh" ? "text-[clamp(2.4rem,4vw,4rem)]" : "text-[clamp(2rem,3.4vw,3.5rem)]"}`}
+            className={`mt-8 max-w-6xl text-balance font-semibold leading-[1.65] text-white/85 ${gameState.language === "zh" ? "text-[clamp(2.4rem,4vw,4rem)]" : "text-[clamp(1.5rem,2.4vw,2.5rem)]"}`}
           >
             {gameState.memoriseText}
           </p>
@@ -1273,44 +1283,71 @@ export default function ScreenPage() {
       <HostShell
         roomCode={roomCode}
         status={status}
-        roomRemaining={roomRemaining}
       >
-        <div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[minmax(0,1fr)_420px]">
-          <section className="host-panel flex flex-1 flex-col items-center justify-center p-8 text-center">
+        <div className="grid min-h-0 flex-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(400px,480px)]">
+          <section className="host-panel flex flex-col p-7 sm:p-8">
+            <div className="flex flex-col items-center text-center">
             <div className="flex size-20 items-center justify-center rounded-[1.6rem] bg-[#ffd166] text-[#171922]">
               <Trophy className="size-10" />
             </div>
             <span className="eyebrow mt-6">
-              {gameState.challengeLabel} complete
+              {gameState.language === "zh"
+                ? gameState.timedOut
+                  ? "挑战未完成"
+                  : `${gameState.challengeLabel}完成`
+                : gameState.timedOut
+                  ? "Challenge not completed"
+                  : `${gameState.challengeLabel} complete`}
             </span>
             <h1 className="mt-4 font-mono text-5xl font-black tracking-[-.04em] sm:text-7xl">
               {formatTime(elapsed)}
             </h1>
             <p className="mt-2 text-white/45">
-              Final time includes +
-              {Math.round((gameState.penaltyMs ?? 0) / 1_000)}s from hints
+              {gameState.timedOut
+                ? gameState.language === "zh"
+                  ? "配对时间已达 20 分钟上限。"
+                  : "The 20-minute matching limit has been reached."
+                : gameState.language === "zh"
+                  ? `最终用时包含提示增加的 ${Math.round((gameState.penaltyMs ?? 0) / 1_000)} 秒`
+                  : `Final time includes +${Math.round((gameState.penaltyMs ?? 0) / 1_000)}s from hints`}
             </p>
-            {submittedRank > 0 ? (
+            {gameState.timedOut ? (
+              <p className="mt-4 rounded-full bg-[#e56b35]/12 px-5 py-2 text-sm font-black text-[#a44a22]">
+                {gameState.language === "zh"
+                  ? "本次未完成挑战，成绩不会列入最快队伍。"
+                  : "This run is incomplete and will not enter the fastest-teams leaderboard."}
+              </p>
+            ) : submittedRank > 0 ? (
               <p
                 className={`mt-4 rounded-full px-5 py-2 text-sm font-black uppercase tracking-[.18em] ${submittedRank === 1 ? "bg-[#ffd166]/15 text-[#ffd166]" : "bg-[#44d79b]/12 text-[#44d79b]"}`}
               >
-                {submittedRank === 1
-                  ? "New fastest team of all time!"
-                  : `#${submittedRank} fastest team of all time`}
+                {gameState.language === "zh"
+                  ? submittedRank === 1
+                    ? "刷新历史最快队伍纪录！"
+                    : `历史最快队伍第 ${submittedRank} 名`
+                  : submittedRank === 1
+                    ? "New fastest team of all time!"
+                    : `#${submittedRank} fastest team of all time`}
               </p>
             ) : submittedRunId ? (
               <p className="mt-4 rounded-full bg-white/[.06] px-5 py-2 text-sm font-bold text-white/45">
-                Great effort — not in the top{" "}
-                {challengeLeaderboard.length || 10} this time
+                {gameState.language === "zh"
+                  ? `表现很棒！本次未进入前 ${challengeLeaderboard.length || 10} 名`
+                  : `Great effort — not in the top ${challengeLeaderboard.length || 10} this time`}
               </p>
             ) : (
               <p className="mt-4 flex items-center gap-2 text-sm text-white/40">
                 <LoaderCircle className="size-4 animate-spin" />
-                Saving your time…
+                {gameState.language === "zh" ? "正在保存成绩…" : "Saving your time…"}
               </p>
             )}
-            <div className="mt-8 grid w-full max-w-5xl items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(340px,440px)]">
-              <div className="w-full space-y-2">
+            </div>
+            <div className="mt-8 grid gap-5 lg:grid-cols-2">
+              <section className="rounded-2xl border border-white/8 bg-white/[.035] p-5">
+                <h2 className="mb-4 text-xl font-black">
+                  {gameState.language === "zh" ? "本场排行榜" : "This game"}
+                </h2>
+                <div className="space-y-2">
                 {rankedPlayers.map((player, index) => (
                   <div
                     key={player.playerId}
@@ -1329,57 +1366,59 @@ export default function ScreenPage() {
                       {player.name}
                     </span>
                     {index === 0 && <Crown className="size-5 text-[#ffd166]" />}
-                    <strong className="font-mono">{player.score} pts</strong>
+                    <strong className="font-mono">
+                      {player.score} {gameState.language === "zh" ? "分" : "pts"}
+                    </strong>
                   </div>
                 ))}
-              </div>
-              <TeamCamera
-                key={gameState.completedAt}
-                rank={
-                  submittedRank >= 1 && submittedRank <= 3
-                    ? submittedRank
-                    : undefined
-                }
-                saveState={photoSaveState}
-                onSave={saveTeamPhoto}
-                autoStart
-                autoSave
-              />
+                </div>
+                <div className="my-5 border-t border-white/10" />
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <h3 className="text-lg font-black">
+                    {gameState.language === "zh" ? "历史最快队伍" : "Fastest teams"}
+                  </h3>
+                  <span className="status-pill">{gameState.challengeLabel}</span>
+                </div>
+                <LeaderboardList
+                  entries={challengeLeaderboard}
+                  highlightId={submittedRunId}
+                  limit={3}
+                  compact
+                  language={gameState.language}
+                  className="min-h-0"
+                />
+              </section>
+              <section className="host-panel flex flex-col gap-4 p-4 sm:p-5">
+                <TeamCamera
+                  key={gameState.completedAt}
+                  rank={
+                    submittedRank >= 1 && submittedRank <= 3
+                      ? submittedRank
+                      : undefined
+                  }
+                  language={gameState.language}
+                  saveState={photoSaveState}
+                  onSave={saveTeamPhoto}
+                  autoStart
+                  autoSave
+                />
+                <div className="rounded-2xl border border-[#e56b35]/25 bg-[#fff1e7] p-4">
+                  <p className="text-sm font-bold text-[#5b7068]">
+                    {gameState.language === "zh"
+                      ? "房间会保持开启，直到你开始新游戏。"
+                      : "This room stays open until you start a new game."}
+                  </p>
+                  <Button
+                    className="mt-3 w-full rounded-2xl bg-white font-bold text-[#151722] hover:bg-white/90"
+                    onClick={openFreshRoom}
+                  >
+                    <RotateCcw className="mr-1 size-4" />
+                    {gameState.language === "zh" ? "开始新游戏" : "Start a new game"}
+                  </Button>
+                </div>
+              </section>
             </div>
-            <div className="mt-6 flex items-center gap-3 rounded-2xl border border-[#e56b35]/25 bg-[#fff1e7] px-5 py-3 text-left">
-              <Clock3
-                className="size-5 shrink-0 text-[#e56b35]"
-                aria-hidden="true"
-              />
-              <span className="text-sm font-bold text-[#5b7068]">
-                New room code appears automatically in
-              </span>
-              <strong className="font-mono text-xl text-[#a44a22]">
-                {formatTime(nextRoomRemaining)}
-              </strong>
-            </div>
-            <Button
-              className="mt-4 h-13 rounded-2xl bg-white px-7 font-bold text-[#151722] hover:bg-white/90"
-              onClick={openFreshRoom}
-            >
-              <RotateCcw className="mr-1 size-4" />
-              Show new code now
-            </Button>
           </section>
-          <aside className="host-panel flex min-h-0 flex-col p-6">
-            <div className="flex items-center justify-between border-b border-white/8 pb-5">
-              <h2 className="flex items-center gap-2 text-2xl font-bold">
-                <Timer className="size-5 text-[#ffd166]" />
-                Fastest teams
-              </h2>
-              <span className="status-pill">{gameState.challengeLabel}</span>
-            </div>
-            <LeaderboardList
-              entries={challengeLeaderboard}
-              highlightId={submittedRunId}
-              className="mt-4 min-h-0 flex-1 overflow-auto"
-            />
-          </aside>
         </div>
       </HostShell>
     );
@@ -1389,7 +1428,6 @@ export default function ScreenPage() {
     <HostShell
       roomCode={roomCode}
       status={status}
-      roomRemaining={roomRemaining}
       lockViewport
     >
       <QuestionStage
@@ -1416,13 +1454,11 @@ export default function ScreenPage() {
 function HostShell({
   roomCode,
   status,
-  roomRemaining,
   lockViewport = false,
   children,
 }: {
   roomCode: string;
   status: ConnectionStatus;
-  roomRemaining: number;
   lockViewport?: boolean;
   children: React.ReactNode;
 }) {
@@ -1506,25 +1542,25 @@ function QuestionStage({
             <span className="eyebrow">
               {challengeLabel ?? "Fill the passage"}
             </span>
-            <p className="mt-3 text-2xl font-semibold text-[#17211c]">
+            <p className={`mt-3 font-semibold text-[#17211c] ${isChinese ? "text-2xl sm:text-3xl" : "text-lg sm:text-xl"}`}>
               {question.instruction}
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-3 xl:flex-nowrap">
             <div className="rounded-2xl bg-[#edf4ef] px-4 py-3">
-              <p className="text-sm text-white/40">Time</p>
+              <p className="text-sm text-white/40">{isChinese ? "用时" : "Time"}</p>
               <p className="font-mono text-3xl font-black">
                 {formatTime(elapsed)}
               </p>
             </div>
             <div className="rounded-2xl bg-[#fff1e7] px-4 py-3">
-              <p className="text-sm text-[#a44a22]">Penalty</p>
+              <p className="text-sm text-[#a44a22]">{isChinese ? "加时" : "Penalty"}</p>
               <p className="font-mono text-2xl font-black text-[#a44a22]">
                 +{Math.round(penaltyMs / 1_000)}s
               </p>
             </div>
             <div className="rounded-2xl bg-[#edf4ef] px-4 py-3">
-              <p className="text-sm text-white/40">Progress</p>
+              <p className="text-sm text-white/40">{isChinese ? "进度" : "Progress"}</p>
               <p className="text-2xl font-black">
                 {correctCount}
                 <span className="text-white/25">
@@ -1541,16 +1577,15 @@ function QuestionStage({
           >
             <Lightbulb className="size-6 shrink-0 text-[#e56b35]" />
             <p>
-              <strong>{hint.answerLabel}</strong> goes in position{" "}
-              <strong>[{hint.targetLabel}]</strong>.
+              {isChinese ? <><strong>{hint.answerLabel}</strong> 应放在第 <strong>[{hint.targetLabel}]</strong> 个位置。</> : <><strong>{hint.answerLabel}</strong> goes in position <strong>[{hint.targetLabel}]</strong>.</>}
             </p>
             <span className="ml-auto rounded-lg bg-white px-3 py-1 text-sm font-black text-[#a44a22]">
-              +25s
+              {isChinese ? "+25秒" : "+25s"}
             </span>
           </div>
         )}
         <div
-          className={`mt-4 shrink-0 grow text-balance font-semibold leading-[1.7] text-[#17211c] ${isChinese ? "text-[clamp(2.4rem,3.5vw,4rem)]" : "text-[clamp(1.8rem,2.6vw,3rem)]"}`}
+          className={`mt-4 shrink-0 grow text-balance font-semibold leading-[1.7] text-[#17211c] ${isChinese ? "text-[clamp(2.4rem,3.5vw,4rem)]" : "text-[clamp(1.35rem,1.8vw,2rem)]"}`}
         >
           {tokens.map((token, index) => {
             const match = token.match(/^\[(\d+)\]$/);
@@ -1613,21 +1648,20 @@ function QuestionStage({
             )}
           </div>
           <strong className="truncate text-sm">
-            {players.length} {players.length === 1 ? "player" : "players"}{" "}
-            connected
+            {isChinese ? `${players.length} 位玩家已连接` : `${players.length} ${players.length === 1 ? "player" : "players"} connected`}
           </strong>
           <span className="ml-auto flex items-center gap-2 text-sm text-white/35">
             <MousePointer2 className="size-4" />
-            AirMouse live
+            {isChinese ? "体感控制已开启" : "AirMouse live"}
           </span>
         </div>
       </section>
       <aside className="host-panel flex min-h-0 min-w-0 flex-col overflow-auto p-5">
         <div className="shrink-0">
-          <span className="eyebrow">Phrase bank · 词组库</span>
-          <h2 className="mt-2 text-3xl font-black">Choose a phrase · 选择词组</h2>
+          <span className="eyebrow">{isChinese ? "词组库" : "Phrase bank"}</span>
+          <h2 className="mt-2 text-3xl font-black">{isChinese ? "选择词组" : "Choose a phrase"}</h2>
           <p className="mt-1 text-lg leading-relaxed text-[#25332d]">
-            Grab a phrase, then release it over the matching position. / 拿起词组，松开放到对应位置。
+            {isChinese ? "拿起词组，松开放到对应位置。" : "Grab a phrase, then release it over the matching position."}
           </p>
         </div>
         <div
@@ -1638,13 +1672,13 @@ function QuestionStage({
             <Lightbulb className="size-6" />
           </span>
           <span className="min-w-0 flex-1">
-            <strong className="block text-xl">Show position · 查看位置</strong>
+            <strong className="block text-xl">{isChinese ? "查看位置" : "Show position"}</strong>
             <span className="block text-base leading-relaxed text-[#25332d]">
-              Drop a phrase here to reveal its position / 把词组放在这里可查看它的位置
+              {isChinese ? "把词组放在这里可查看它的位置" : "Drop a phrase here to reveal its position"}
             </span>
           </span>
           <span className="shrink-0 rounded-lg bg-white px-3 py-2 text-sm font-black text-[#a44a22]">
-            +25s
+            {isChinese ? "+25秒" : "+25s"}
           </span>
         </div>
         <div className="mt-3 grid shrink-0 grow grid-cols-2 content-start gap-2 xl:grid-cols-3">
@@ -1652,7 +1686,7 @@ function QuestionStage({
             <div
               key={answer.id}
               data-answer-card={answer.id}
-              className={`flex min-h-16 cursor-none items-center rounded-xl border border-black/8 bg-white px-3 py-3 font-black leading-snug text-[#111814] shadow-sm ${isChinese ? "text-[clamp(1.4rem,1.6vw,1.9rem)]" : "text-[clamp(1.1rem,1.2vw,1.5rem)]"}`}
+              className={`flex min-h-16 cursor-none items-center rounded-xl border border-black/8 bg-white px-3 py-3 font-black leading-snug text-[#111814] shadow-sm ${isChinese ? "text-[clamp(1.4rem,1.6vw,1.9rem)]" : "text-[clamp(.9rem,1vw,1.1rem)]"}`}
             >
               <TbHandGrab className="mr-2 size-6 shrink-0 text-[#e56b35]" />
               {answer.label}
@@ -1661,12 +1695,12 @@ function QuestionStage({
           {complete && (
             <div className="col-span-full rounded-2xl bg-[#dff5e8] p-5 text-lg font-bold text-[#087653]">
               <Check className="mr-2 inline size-6" />
-              Passage complete · 经文填完了
+              {isChinese ? "经文填完了" : "Passage complete"}
             </div>
           )}
           {!complete && poolAnswers.length === 0 && (
             <p className="col-span-full rounded-2xl bg-[#fff1e7] p-4 text-base font-semibold text-[#9a3f17]">
-              Every phrase is placed. Move the orange ones to a different position. / 所有词组都已放置。请移动橙色词组到其他位置。
+              {isChinese ? "所有词组都已放置。请移动橙色词组到其他位置。" : "Every phrase is placed. Move the orange ones to a different position."}
             </p>
           )}
         </div>
@@ -1675,8 +1709,8 @@ function QuestionStage({
   );
 }
 
-function formatDate(timestamp: number) {
-  return new Date(timestamp).toLocaleDateString(undefined, {
+function formatDate(timestamp: number, language: "en" | "zh" = "en") {
+  return new Date(timestamp).toLocaleDateString(language === "zh" ? "zh-CN" : "en", {
     day: "numeric",
     month: "short",
   });
@@ -1687,14 +1721,17 @@ function LeaderboardList({
   highlightId,
   limit = 10,
   compact = false,
+  language = "en",
   className = "",
 }: {
   entries: LeaderboardEntry[];
   highlightId?: string | null;
   limit?: number;
   compact?: boolean;
+  language?: "en" | "zh";
   className?: string;
 }) {
+  const isChinese = language === "zh";
   const visible = entries.slice(0, limit);
   if (visible.length === 0) {
     return (
@@ -1703,7 +1740,7 @@ function LeaderboardList({
       >
         <Timer className="mb-2 size-6" />
         <p className="text-sm font-semibold">
-          No times yet — be the first team!
+          {isChinese ? "暂无成绩，来争取第一个名次！" : "No times yet — be the first team!"}
         </p>
       </div>
     );
@@ -1738,16 +1775,18 @@ function LeaderboardList({
                 {entry.teamName}
                 {highlighted && (
                   <span className="ml-2 rounded-md bg-[#44d79b] px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-[#0f2a20]">
-                    You
+                    {isChinese ? "你们" : "You"}
                   </span>
                 )}
               </span>
               <span className="block truncate text-[11px] text-white/35">
-                {entry.playerCount}{" "}
-                {entry.playerCount === 1 ? "player" : "players"} ·{" "}
-                {formatDate(entry.completedAt)}
+                {isChinese
+                  ? `${entry.playerCount} 位玩家 · ${formatDate(entry.completedAt, language)}`
+                  : `${entry.playerCount} ${entry.playerCount === 1 ? "player" : "players"} · ${formatDate(entry.completedAt, language)}`}
                 {entry.penaltyMs > 0
-                  ? ` · +${Math.round(entry.penaltyMs / 1_000)}s hints`
+                  ? isChinese
+                    ? ` · 提示加时 ${Math.round(entry.penaltyMs / 1_000)} 秒`
+                    : ` · +${Math.round(entry.penaltyMs / 1_000)}s hints`
                   : ""}
               </span>
             </span>
