@@ -39,6 +39,22 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+function photoDownloadFileName(timestamp: number) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Singapore",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(timestamp));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? "00";
+  return `BWM MRD 2026 AirMouse - ${part("year")}-${part("month")}-${part("day")} ${part("hour")}-${part("minute")}-${part("second")} SGT.jpg`;
+}
+
 function isOriginAllowed(request: Request, configuredOrigins?: string) {
   if (!configuredOrigins?.trim()) return true;
 
@@ -168,7 +184,11 @@ export class Leaderboard extends DurableObject<Env> {
       for (const removed of [...entries, entry].filter(
         (item) => !next.some((kept) => kept.id === item.id),
       )) {
-        await txn.delete([`photo:${removed.id}`, `owner:${removed.id}`]);
+        await txn.delete([
+          `photo:${removed.id}`,
+          `photo-created:${removed.id}`,
+          `owner:${removed.id}`,
+        ]);
       }
     });
     return next;
@@ -198,12 +218,22 @@ export class Leaderboard extends DurableObject<Env> {
       if (entry.hasPhoto) return null;
       entry.hasPhoto = true;
       await txn.put({ entries, [`photo:${runId}`]: photo });
+      await txn.put(`photo-created:${runId}`, Date.now());
       return null;
     });
   }
 
-  async photo(runId: string): Promise<string | undefined> {
-    return this.ctx.storage.get<string>(`photo:${runId}`);
+  async photoDetails(runId: string): Promise<{ photo: string; createdAt: number } | undefined> {
+    const photo = await this.ctx.storage.get<string>(`photo:${runId}`);
+    if (!photo) return undefined;
+    const [createdAt, entries] = await Promise.all([
+      this.ctx.storage.get<number>(`photo-created:${runId}`),
+      this.list(),
+    ]);
+    return {
+      photo,
+      createdAt: createdAt ?? entries.find((entry) => entry.id === runId)?.completedAt ?? Date.now(),
+    };
   }
 }
 
@@ -221,13 +251,17 @@ export class SharedPhoto extends DurableObject<Env> {
       return false;
     }
 
-    await this.ctx.storage.put("photo", photo);
+    await this.ctx.storage.put({ photo, createdAt: Date.now() });
     await this.ctx.storage.setAlarm(Date.now() + SHARED_PHOTO_TTL_MS);
     return true;
   }
 
-  async photo(): Promise<string | undefined> {
-    return this.ctx.storage.get<string>("photo");
+  async photoDetails(): Promise<{ photo: string; createdAt: number } | undefined> {
+    const [photo, createdAt] = await Promise.all([
+      this.ctx.storage.get<string>("photo"),
+      this.ctx.storage.get<number>("createdAt"),
+    ]);
+    return photo ? { photo, createdAt: createdAt ?? Date.now() } : undefined;
   }
 
   async alarm(): Promise<void> {
@@ -590,14 +624,14 @@ export default {
     const photoMatch = url.pathname.match(/^\/leaderboard\/photos\/([A-Za-z0-9-]{1,64})(\/download)?$/);
     if (photoMatch && request.method === "GET") {
       const id = photoMatch[1];
-      const photo = id.startsWith("s-")
-        ? await env.SHARED_PHOTOS.getByName(id).photo()
-        : await env.LEADERBOARD.getByName(LEADERBOARD_ID).photo(id);
-      if (!photo) return jsonResponse({ error: "Photo not found" }, 404);
-      const bytes = Uint8Array.from(atob(photo.split(",")[1]), (character) => character.charCodeAt(0));
+      const photoDetails = id.startsWith("s-")
+        ? await env.SHARED_PHOTOS.getByName(id).photoDetails()
+        : await env.LEADERBOARD.getByName(LEADERBOARD_ID).photoDetails(id);
+      if (!photoDetails) return jsonResponse({ error: "Photo not found" }, 404);
+      const bytes = Uint8Array.from(atob(photoDetails.photo.split(",")[1]), (character) => character.charCodeAt(0));
       return new Response(bytes, { headers: {
         "content-type": "image/jpeg",
-        ...(photoMatch[2] ? { "content-disposition": `attachment; filename="team-photo-${photoMatch[1]}.jpg"` } : {}),
+        ...(photoMatch[2] ? { "content-disposition": `attachment; filename="${photoDownloadFileName(photoDetails.createdAt)}"` } : {}),
         "cache-control": "public, max-age=3600",
         "x-content-type-options": "nosniff",
       } });

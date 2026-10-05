@@ -257,160 +257,163 @@ export function TeamCamera({
   }, [autoSave, onSave, photo, saveState.status]);
 
   return (
-    <section className="w-full rounded-2xl border border-[#e56b35]/25 bg-[#fff1e7] p-4 text-left sm:p-5">
-      <h2 className="flex items-center justify-center gap-2 text-xl font-black">
-        <Camera className="size-5" />{" "}
-        {isChinese
-          ? rank
-            ? `第 ${rank} 名合影`
-            : "队伍合影"
-          : rank
-            ? `Top ${rank} finish — team photo!`
-            : "Team photo"}
-      </h2>
-      <p className="mt-2 text-center text-sm font-semibold text-[#5b7068]">
-        {isChinese
-          ? "准备好，摄像头即将启动，并在倒数 5、4、3、2、1 后拍照。"
-          : "Get ready — the camera starts now and takes the photo after 5, 4, 3, 2, 1."}
-      </p>
-
-      <div className="relative mt-4 aspect-[4/3] overflow-hidden rounded-xl bg-[#17231f]">
-        <video
-          ref={videoRef}
-          autoPlay
-          muted
-          playsInline
-          className={`absolute inset-0 h-full w-full scale-x-[-1] object-cover transition-opacity ${camera === "off" || photo ? "opacity-0" : "opacity-100"}`}
-        />
-        {photo ? (
-          <Image
-            src={photo}
-            alt={isChinese ? "队伍合影预览" : "Your team photo preview"}
-            width={640}
-            height={480}
-            unoptimized
-            className="absolute inset-0 h-full w-full object-cover"
+    <section className="w-full rounded-2xl border border-[#e56b35]/25 bg-[#fff1e7] p-4 text-left sm:p-5 flex">
+      <div>
+        <h2 className="flex items-center justify-center gap-2 text-xl font-black">
+          <Camera className="size-5" />{" "}
+          {isChinese
+            ? rank
+              ? `第 ${rank} 名合影`
+              : "队伍合影"
+            : rank
+              ? `Top ${rank} finish — team photo!`
+              : "Team photo"}
+        </h2>
+        <p className="mt-2 text-center text-sm font-semibold text-[#5b7068]">
+          {isChinese
+            ? "准备好，摄像头即将启动，并在倒数 5、4、3、2、1 后拍照。"
+            : "Get ready — the camera starts now and takes the photo after 5, 4, 3, 2, 1."}
+        </p>
+        <div className="relative mt-4 aspect-[4/3] overflow-hidden rounded-xl bg-[#17231f]">
+          <video
+            ref={videoRef}
+            autoPlay
+            muted
+            playsInline
+            className={`absolute inset-0 h-full w-full scale-x-[-1] object-cover transition-opacity ${camera === "off" || photo ? "opacity-0" : "opacity-100"}`}
           />
-        ) : camera === "off" ? (
-          <div className="keep-white absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center text-white/75">
-            <Camera className="size-10" aria-hidden="true" />
-            <span className="text-sm font-bold">
-              {isChinese
-                ? "摄像头画面将在此显示"
-                : "Your camera preview will appear here"}
-            </span>
-          </div>
-        ) : (
-          <div
-            role="status"
-            aria-live="assertive"
-            aria-atomic="true"
-            className="keep-white pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-transparent text-white"
-          >
-            {countdown !== null ? (
-              <>
-                <strong className="text-7xl font-black drop-shadow-lg sm:text-8xl">
-                  {countdown}
-                </strong>
-                <span className="rounded-full bg-black/50 px-4 py-1.5 text-sm font-bold">
-                  {isChinese ? "准备好！" : "Get ready!"}
-                </span>
-              </>
-            ) : (
-              <span className="rounded-full bg-black/50 px-4 py-2 text-sm font-bold">
-                {isChinese ? "正在开启摄像头…" : "Opening camera…"}
+          {photo ? (
+            <Image
+              src={photo}
+              alt={isChinese ? "队伍合影预览" : "Your team photo preview"}
+              width={640}
+              height={480}
+              unoptimized
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+          ) : camera === "off" ? (
+            <div className="keep-white absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center text-white/75">
+              <Camera className="size-10" aria-hidden="true" />
+              <span className="text-sm font-bold">
+                {isChinese
+                  ? "摄像头画面将在此显示"
+                  : "Your camera preview will appear here"}
               </span>
-            )}
-          </div>
-        )}
+            </div>
+          ) : (
+            <div
+              role="status"
+              aria-live="assertive"
+              aria-atomic="true"
+              className="keep-white pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-transparent text-white"
+            >
+              {countdown !== null ? (
+                <>
+                  <strong className="text-7xl font-black drop-shadow-lg sm:text-8xl">
+                    {countdown}
+                  </strong>
+                  <span className="rounded-full bg-black/50 px-4 py-1.5 text-sm font-bold">
+                    {isChinese ? "准备好！" : "Get ready!"}
+                  </span>
+                </>
+              ) : (
+                <span className="rounded-full bg-black/50 px-4 py-2 text-sm font-bold">
+                  {isChinese ? "正在开启摄像头…" : "Opening camera…"}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
-      {(error || saveState.error) && (
-        <p role="alert" className="mt-3 text-sm text-[#a44a22]">
-          {error || saveState.error}
-        </p>
-      )}
-      {photo && photoDownloadUrl && saveState.status === "saved" && (
-        <div className="mt-4 rounded-2xl border border-[#16865c]/20 bg-white p-4 text-center">
-          <p className="text-sm font-bold text-[#17211c]">
-            {isChinese
-              ? "扫码下载带水印的队伍合影"
-              : "Scan to download your watermarked team photo"}
+      <div>
+        {(error || saveState.error) && (
+          <p role="alert" className="mt-3 text-sm text-[#a44a22]">
+            {error || saveState.error}
           </p>
-          <div className="mx-auto mt-3 w-fit rounded-xl border border-black/5 bg-white p-2">
-            <QRCodeSVG
-              value={photoDownloadUrl}
-              size={180}
-              level="M"
-              bgColor="#ffffff"
-              fgColor="#17211c"
-            />
-          </div>
-          <a
-            href={photoDownloadUrl}
-            className="mt-3 inline-flex items-center gap-2 rounded-xl bg-[#16865c] px-4 py-2 text-sm font-bold text-white hover:bg-[#116b49]"
-          >
-            <Download className="size-4" />{" "}
-            {isChinese ? "在此设备下载" : "Download on this device"}
-          </a>
-        </div>
-      )}
-      <div className="mt-4 flex flex-wrap justify-center gap-2">
-        {saveState.status === "saved" ? (
-          <p
-            role="status"
-            className="flex items-center gap-2 font-bold text-[#087653]"
-          >
-            <Check className="size-5" />{" "}
-            {isChinese
-              ? rank
-                ? "队伍合影已保存！"
-                : "照片已准备好下载！"
-              : rank
-                ? "Team photo saved!"
-                : "Photo ready to download!"}
-          </p>
-        ) : photo ? (
-          <>
-            <Button
-              variant="outline"
-              disabled={saveState.status === "saving"}
-              onClick={() => void openCamera()}
-            >
-              <RotateCcw className="size-4" /> {isChinese ? "重拍" : "Retake"}
-            </Button>
-            {saveState.status === "saving" ? (
-              <p role="status" className="font-bold text-[#5b7068]">
-                {isChinese ? "正在保存照片…" : "Saving photo…"}
-              </p>
-            ) : saveState.status === "error" ? (
-              <Button onClick={() => onSave(photo)}>
-                {isChinese ? "重试保存照片" : "Retry photo save"}
-              </Button>
-            ) : !rank ? (
-              <p
-                role="status"
-                className="flex items-center gap-2 font-bold text-[#087653]"
-              >
-                <Check className="size-5" />{" "}
-                {isChinese ? "照片已拍摄！" : "Photo captured!"}
-              </p>
-            ) : (
-              <Button onClick={() => onSave(photo)}>
-                {isChinese ? "保存队伍合影" : "Save team photo"}
-              </Button>
-            )}
-          </>
-        ) : camera !== "off" ? (
-          <Button variant="outline" onClick={stopCamera}>
-            {isChinese ? "取消" : "Cancel"}
-          </Button>
-        ) : (
-          <Button onClick={() => void openCamera()}>
-            <Camera className="size-4" />{" "}
-            {isChinese ? "开始拍照倒数" : "Start photo countdown"}
-          </Button>
         )}
+        {photo && photoDownloadUrl && saveState.status === "saved" && (
+          <div className="mt-4 rounded-2xl border border-[#16865c]/20 bg-white p-4 text-center">
+            <p className="text-sm font-bold text-[#17211c]">
+              {isChinese
+                ? "扫码下载带水印的队伍合影"
+                : "Scan to download your watermarked team photo"}
+            </p>
+            <div className="mx-auto mt-3 w-fit rounded-xl border border-black/5 bg-white p-2">
+              <QRCodeSVG
+                value={photoDownloadUrl}
+                size={180}
+                level="M"
+                bgColor="#ffffff"
+                fgColor="#17211c"
+              />
+            </div>
+            <a
+              href={photoDownloadUrl}
+              className="mt-3 inline-flex items-center gap-2 rounded-xl bg-[#16865c] px-4 py-2 text-sm font-bold text-white hover:bg-[#116b49]"
+            >
+              <Download className="size-4" />{" "}
+              {isChinese ? "在此设备下载" : "Download on this device"}
+            </a>
+          </div>
+        )}
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
+          {saveState.status === "saved" ? (
+            <p
+              role="status"
+              className="flex items-center gap-2 font-bold text-[#087653]"
+            >
+              <Check className="size-5" />{" "}
+              {isChinese
+                ? rank
+                  ? "队伍合影已保存！"
+                  : "照片已准备好下载！"
+                : rank
+                  ? "Team photo saved!"
+                  : "Photo ready to download!"}
+            </p>
+          ) : photo ? (
+            <>
+              <Button
+                variant="outline"
+                disabled={saveState.status === "saving"}
+                onClick={() => void openCamera()}
+              >
+                <RotateCcw className="size-4" /> {isChinese ? "重拍" : "Retake"}
+              </Button>
+              {saveState.status === "saving" ? (
+                <p role="status" className="font-bold text-[#5b7068]">
+                  {isChinese ? "正在保存照片…" : "Saving photo…"}
+                </p>
+              ) : saveState.status === "error" ? (
+                <Button onClick={() => onSave(photo)}>
+                  {isChinese ? "重试保存照片" : "Retry photo save"}
+                </Button>
+              ) : !rank ? (
+                <p
+                  role="status"
+                  className="flex items-center gap-2 font-bold text-[#087653]"
+                >
+                  <Check className="size-5" />{" "}
+                  {isChinese ? "照片已拍摄！" : "Photo captured!"}
+                </p>
+              ) : (
+                <Button onClick={() => onSave(photo)}>
+                  {isChinese ? "保存队伍合影" : "Save team photo"}
+                </Button>
+              )}
+            </>
+          ) : camera !== "off" ? (
+            <Button variant="outline" onClick={stopCamera}>
+              {isChinese ? "取消" : "Cancel"}
+            </Button>
+          ) : (
+            <Button onClick={() => void openCamera()}>
+              <Camera className="size-4" />{" "}
+              {isChinese ? "开始拍照倒数" : "Start photo countdown"}
+            </Button>
+          )}
+        </div>
       </div>
     </section>
   );
