@@ -20,6 +20,7 @@ interface Env {
   ROOMS: DurableObjectNamespace<Room>;
   LEADERBOARD: DurableObjectNamespace<Leaderboard>;
   SHARED_PHOTOS: DurableObjectNamespace<SharedPhoto>;
+  PHOTOS: R2Bucket;
   ALLOWED_ORIGINS?: string;
 }
 
@@ -29,7 +30,6 @@ const LEADERBOARD_ID = "global";
 const LEADERBOARD_PER_CHALLENGE = 10;
 const LEADERBOARD_MIN_TIME_MS = 10_000;
 const LEADERBOARD_MAX_TIME_MS = 6 * 60 * 60 * 1_000;
-const SHARED_PHOTO_TTL_MS = 24 * 60 * 60 * 1_000;
 const PRODUCTION_APP_ORIGINS = new Set(["https://bwm-air-mouse.vercel.app"]);
 
 function jsonResponse(body: unknown, status = 200) {
@@ -53,6 +53,24 @@ function photoDownloadFileName(timestamp: number) {
   const part = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((item) => item.type === type)?.value ?? "00";
   return `BWM MRD 2026 AirMouse - ${part("year")}-${part("month")}-${part("day")} ${part("hour")}-${part("minute")}-${part("second")} SGT.jpg`;
+}
+
+function parseJpegDataUrl(photo: unknown): Uint8Array | null {
+  if (
+    typeof photo !== "string" || photo.length > MAX_TEAM_PHOTO_LENGTH ||
+    !/^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/]*={0,2}$/.test(photo)
+  ) return null;
+  try {
+    const bytes = Uint8Array.from(
+      atob(photo.slice("data:image/jpeg;base64,".length)),
+      (character) => character.charCodeAt(0),
+    );
+    return bytes.length >= 4 && bytes[bytes.length - 2] === 0xff && bytes[bytes.length - 1] === 0xd9
+      ? bytes
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function isOriginAllowed(request: Request, configuredOrigins?: string) {
@@ -184,88 +202,70 @@ export class Leaderboard extends DurableObject<Env> {
       for (const removed of [...entries, entry].filter(
         (item) => !next.some((kept) => kept.id === item.id),
       )) {
-        await txn.delete([
-          `photo:${removed.id}`,
-          `photo-created:${removed.id}`,
-          `owner:${removed.id}`,
-        ]);
+        // Photo objects are archived in R2 and retained after leaderboard eviction.
+        await txn.delete(`owner:${removed.id}`);
       }
     });
     return next;
   }
 
   async savePhoto(runId: string, photo: string, ownerId: string): Promise<string | null> {
-    if (
-      typeof photo !== "string" || photo.length > MAX_TEAM_PHOTO_LENGTH ||
-      !/^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/]*={0,2}$/.test(photo)
-    ) return "Please take a new photo and try again.";
-    try {
-      const bytes = atob(photo.slice("data:image/jpeg;base64,".length));
-      if (!bytes.endsWith("\xff\xd9")) return "Please take a new photo and try again.";
-    } catch {
-      return "Please take a new photo and try again.";
-    }
+    const bytes = parseJpegDataUrl(photo);
+    if (!bytes) return "Please take a new photo and try again.";
+    const entries = await this.list();
+    const entry = entries.find((item) => item.id === runId);
+    if (!entry || await this.ctx.storage.get<string>(`owner:${runId}`) !== ownerId)
+      return "This photo does not belong to this room's result.";
+    const rank = entries.filter((item) => item.challengeId === entry.challengeId)
+      .findIndex((item) => item.id === runId);
+    if (rank < 0 || rank > 2) return "Your team is no longer in the top three.";
+    if (entry.hasPhoto && await this.env.PHOTOS.head(`photos/leaderboard/${runId}.jpg`)) return null;
 
-    return this.ctx.storage.transaction(async (txn) => {
-      const entries = (await txn.get<LeaderboardEntry[]>("entries")) ?? [];
-      const entry = entries.find((item) => item.id === runId);
-      if (!entry || await txn.get<string>(`owner:${runId}`) !== ownerId)
-        return "This photo does not belong to this room's result.";
-      const rank = entries.filter((item) => item.challengeId === entry.challengeId)
-        .findIndex((item) => item.id === runId);
-      if (rank < 0 || rank > 2) return "Your team is no longer in the top three.";
-      // One confirmed photo per run makes retries safe and image URLs stable.
-      if (entry.hasPhoto) return null;
-      entry.hasPhoto = true;
-      await txn.put({ entries, [`photo:${runId}`]: photo });
-      await txn.put(`photo-created:${runId}`, Date.now());
-      return null;
+    const createdAt = Date.now();
+    await this.env.PHOTOS.put(`photos/leaderboard/${runId}.jpg`, bytes, {
+      httpMetadata: { contentType: "image/jpeg" },
+      customMetadata: {
+        createdAt: String(createdAt),
+        runId,
+        kind: "leaderboard",
+        challenge: entry.challengeLabel,
+        teamName: entry.teamName,
+        completedAt: String(entry.completedAt),
+      },
     });
+    await this.ctx.storage.transaction(async (txn) => {
+      const latest = (await txn.get<LeaderboardEntry[]>("entries")) ?? [];
+      const latestEntry = latest.find((item) => item.id === runId);
+      if (!latestEntry || await txn.get<string>(`owner:${runId}`) !== ownerId) return;
+      latestEntry.hasPhoto = true;
+      await txn.put("entries", latest);
+    });
+    return null;
   }
 
-  async photoDetails(runId: string): Promise<{ photo: string; createdAt: number } | undefined> {
+  async photoDetails(runId: string): Promise<R2ObjectBody | null> {
+    return this.env.PHOTOS.get(`photos/leaderboard/${runId}.jpg`);
+  }
+
+  async legacyPhotoDetails(runId: string): Promise<{ photo: string; createdAt: number } | undefined> {
     const photo = await this.ctx.storage.get<string>(`photo:${runId}`);
     if (!photo) return undefined;
-    const [createdAt, entries] = await Promise.all([
-      this.ctx.storage.get<number>(`photo-created:${runId}`),
-      this.list(),
-    ]);
     return {
       photo,
-      createdAt: createdAt ?? entries.find((entry) => entry.id === runId)?.completedAt ?? Date.now(),
+      createdAt: (await this.ctx.storage.get<number>(`photo-created:${runId}`)) ?? Date.now(),
     };
   }
 }
 
 /** Temporary public photo link for captured photos that are not leaderboard entries. */
 export class SharedPhoto extends DurableObject<Env> {
-  async save(photo: unknown): Promise<boolean> {
-    if (
-      typeof photo !== "string" || photo.length > MAX_TEAM_PHOTO_LENGTH ||
-      !/^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/]*={0,2}$/.test(photo)
-    ) return false;
-    try {
-      const bytes = atob(photo.slice("data:image/jpeg;base64,".length));
-      if (!bytes.endsWith("\xff\xd9")) return false;
-    } catch {
-      return false;
-    }
-
-    await this.ctx.storage.put({ photo, createdAt: Date.now() });
-    await this.ctx.storage.setAlarm(Date.now() + SHARED_PHOTO_TTL_MS);
-    return true;
-  }
-
-  async photoDetails(): Promise<{ photo: string; createdAt: number } | undefined> {
-    const [photo, createdAt] = await Promise.all([
-      this.ctx.storage.get<string>("photo"),
-      this.ctx.storage.get<number>("createdAt"),
-    ]);
-    return photo ? { photo, createdAt: createdAt ?? Date.now() } : undefined;
-  }
-
-  async alarm(): Promise<void> {
-    await this.ctx.storage.deleteAll();
+  async legacyPhotoDetails(): Promise<{ photo: string; createdAt: number } | undefined> {
+    const photo = await this.ctx.storage.get<string>("photo");
+    if (!photo) return undefined;
+    return {
+      photo,
+      createdAt: (await this.ctx.storage.get<number>("createdAt")) ?? Date.now(),
+    };
   }
 }
 
@@ -615,26 +615,49 @@ export default {
         return respond({ error: "Invalid photo upload." }, 400);
       }
       const id = `s-${crypto.randomUUID()}`;
-      const saved = await env.SHARED_PHOTOS.getByName(id).save(body.photo);
-      return saved
-        ? respond({ id }, 201)
-        : respond({ error: "Please take a new photo and try again." }, 400);
+      const bytes = parseJpegDataUrl(body.photo);
+      if (!bytes) return respond({ error: "Please take a new photo and try again." }, 400);
+      const createdAt = Date.now();
+      await env.PHOTOS.put(`photos/shared/${id}.jpg`, bytes, {
+        httpMetadata: { contentType: "image/jpeg" },
+        customMetadata: { createdAt: String(createdAt), kind: "shared" },
+      });
+      return respond({ id }, 201);
     }
 
     const photoMatch = url.pathname.match(/^\/leaderboard\/photos\/([A-Za-z0-9-]{1,64})(\/download)?$/);
     if (photoMatch && request.method === "GET") {
       const id = photoMatch[1];
-      const photoDetails = id.startsWith("s-")
-        ? await env.SHARED_PHOTOS.getByName(id).photoDetails()
+      const object = id.startsWith("s-")
+        ? await env.PHOTOS.get(`photos/shared/${id}.jpg`)
         : await env.LEADERBOARD.getByName(LEADERBOARD_ID).photoDetails(id);
-      if (!photoDetails) return jsonResponse({ error: "Photo not found" }, 404);
-      const bytes = Uint8Array.from(atob(photoDetails.photo.split(",")[1]), (character) => character.charCodeAt(0));
-      return new Response(bytes, { headers: {
-        "content-type": "image/jpeg",
-        ...(photoMatch[2] ? { "content-disposition": `attachment; filename="${photoDownloadFileName(photoDetails.createdAt)}"` } : {}),
-        "cache-control": "public, max-age=3600",
-        "x-content-type-options": "nosniff",
-      } });
+      if (object) {
+        const createdAt = Number(object.customMetadata?.createdAt) || object.uploaded.getTime();
+        const headers = new Headers();
+        object.writeHttpMetadata(headers);
+        headers.set("cache-control", "public, max-age=3600");
+        headers.set("x-content-type-options", "nosniff");
+        if (photoMatch[2]) {
+          headers.set("content-disposition", `attachment; filename="${photoDownloadFileName(createdAt)}"`);
+        }
+        return new Response(object.body, { headers });
+      }
+      // Existing share links created before the R2 archive remain usable until their old 24-hour expiry.
+      {
+        const legacy = id.startsWith("s-")
+          ? await env.SHARED_PHOTOS.getByName(id).legacyPhotoDetails()
+          : await env.LEADERBOARD.getByName(LEADERBOARD_ID).legacyPhotoDetails(id);
+        if (legacy) {
+          const bytes = Uint8Array.from(atob(legacy.photo.split(",")[1]), (character) => character.charCodeAt(0));
+          return new Response(bytes, { headers: {
+            "content-type": "image/jpeg",
+            ...(photoMatch[2] ? { "content-disposition": `attachment; filename="${photoDownloadFileName(legacy.createdAt)}"` } : {}),
+            "cache-control": "public, max-age=3600",
+            "x-content-type-options": "nosniff",
+          } });
+        }
+      }
+      return jsonResponse({ error: "Photo not found" }, 404);
     }
 
     const match = url.pathname.match(/^\/rooms\/([^/]+)$/);

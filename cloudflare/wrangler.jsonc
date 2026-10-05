@@ -6,6 +6,12 @@
   "observability": {
     "enabled": true
   },
+  "r2_buckets": [
+    {
+      "binding": "PHOTOS",
+      "bucket_name": "mrd-group-photos"
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {

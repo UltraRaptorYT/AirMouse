@@ -117,7 +117,7 @@ export function TeamCamera({
         throw new Error("The camera is not ready. Please try again.");
       }
       const canvas = document.createElement("canvas");
-      canvas.width = Math.min(640, video.videoWidth);
+      canvas.width = Math.min(1280, video.videoWidth);
       canvas.height = Math.round(
         (canvas.width * video.videoHeight) / video.videoWidth,
       );
@@ -206,8 +206,8 @@ export function TeamCamera({
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: "user",
-          width: { ideal: 640 },
-          height: { ideal: 480 },
+              width: { ideal: 1280 },
+              height: { ideal: 960 },
         },
         audio: false,
       });
@@ -257,8 +257,8 @@ export function TeamCamera({
   }, [autoSave, onSave, photo, saveState.status]);
 
   return (
-    <section className="w-full rounded-2xl border border-[#e56b35]/25 bg-[#fff1e7] p-4 text-left sm:p-5 flex">
-      <div>
+    <section className="grid w-full min-w-0 gap-5 rounded-2xl border border-[#e56b35]/25 bg-[#fff1e7] p-4 text-left sm:p-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,.9fr)]">
+      <div className="min-w-0">
         <h2 className="flex items-center justify-center gap-2 text-xl font-black">
           <Camera className="size-5" />{" "}
           {isChinese
@@ -286,8 +286,8 @@ export function TeamCamera({
             <Image
               src={photo}
               alt={isChinese ? "队伍合影预览" : "Your team photo preview"}
-              width={640}
-              height={480}
+              width={1280}
+              height={960}
               unoptimized
               className="absolute inset-0 h-full w-full object-cover"
             />
@@ -326,7 +326,7 @@ export function TeamCamera({
         </div>
       </div>
 
-      <div>
+      <div className="flex min-w-0 flex-col justify-center">
         {(error || saveState.error) && (
           <p role="alert" className="mt-3 text-sm text-[#a44a22]">
             {error || saveState.error}
@@ -339,11 +339,12 @@ export function TeamCamera({
                 ? "扫码下载带水印的队伍合影"
                 : "Scan to download your watermarked team photo"}
             </p>
-            <div className="mx-auto mt-3 w-fit rounded-xl border border-black/5 bg-white p-2">
+            <div className="mx-auto mt-3 w-full max-w-[480px] rounded-xl border border-black/5 bg-white p-2">
               <QRCodeSVG
                 value={photoDownloadUrl}
-                size={180}
+                size={420}
                 level="M"
+                className="block h-auto w-full"
                 bgColor="#ffffff"
                 fgColor="#17211c"
               />

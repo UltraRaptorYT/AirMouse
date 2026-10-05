@@ -115,3 +115,9 @@ the [Cloudflare Durable Objects pricing documentation](https://developers.cloudf
 - The latest game-state snapshot is stored so a reconnecting phone can resume.
 - Player connection metadata is attached to the hibernating WebSocket.
 - Questions currently remain in `lib/game/questions.ts`.
+- Captured team photos are stored in the private `mrd-group-photos` R2 bucket
+  under `photos/shared/` or `photos/leaderboard/`. New photos remain there until
+  deleted from the bucket. The photo QR/download links are served by the Worker.
+- Open **Cloudflare Dashboard → R2 object storage → mrd-group-photos** to browse
+  and download the original photo files. Each object includes its capture time
+  and, for leaderboard photos, the team and challenge in its custom metadata.

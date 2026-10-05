@@ -1389,7 +1389,7 @@ export default function ScreenPage() {
                 </p>
               )}
             </div>
-            <div className="mt-8 grid gap-5 lg:grid-cols-2">
+            <div className="mt-8 grid gap-5">
               <section className="host-panel flex flex-col gap-4 p-4 sm:p-5">
                 <TeamCamera
                   key={gameState.completedAt}
