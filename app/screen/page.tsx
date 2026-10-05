@@ -296,7 +296,8 @@ export default function ScreenPage() {
 
   useEffect(() => {
     if (gameState.phase !== "finished") return;
-    const deadline = (gameState.completedAt ?? Date.now()) + RESULTS_SCREEN_TTL_MS;
+    const deadline =
+      (gameState.completedAt ?? Date.now()) + RESULTS_SCREEN_TTL_MS;
     const timer = window.setTimeout(
       openFreshRoom,
       Math.max(0, deadline - Date.now()),
@@ -1405,7 +1406,10 @@ export default function ScreenPage() {
                 />
                 <div className="rounded-2xl border border-[#e56b35]/25 bg-[#fff1e7] p-4">
                   <div className="mb-3 flex items-center gap-3">
-                    <Clock3 className="size-5 shrink-0 text-[#e56b35]" aria-hidden="true" />
+                    <Clock3
+                      className="size-5 shrink-0 text-[#e56b35]"
+                      aria-hidden="true"
+                    />
                     <span className="flex-1 text-sm font-bold text-[#5b7068]">
                       {gameState.language === "zh"
                         ? "新房间码将在以下时间后显示"
@@ -1431,59 +1435,52 @@ export default function ScreenPage() {
                   </Button>
                 </div>
               </section>
-              <section className="rounded-2xl border border-white/8 bg-white/[.035] p-5">
-                <h2 className="mb-4 text-xl font-black">
-                  {gameState.language === "zh" ? "本场排行榜" : "This game"}
-                </h2>
-                <div className="space-y-2">
-                  {rankedPlayers.map((player, index) => (
-                    <div
-                      key={player.playerId}
-                      className={`flex items-center gap-4 rounded-2xl border px-5 py-4 text-left ${index === 0 ? "border-[#ffd166]/40 bg-[#ffd166]/10" : "border-white/8 bg-white/[.035]"}`}
-                    >
-                      <span className="w-7 text-xl font-black text-white/30">
-                        {index + 1}
-                      </span>
-                      <span
-                        className="flex size-10 items-center justify-center rounded-xl font-black"
-                        style={{ backgroundColor: player.color }}
-                      >
-                        {player.name[0]?.toUpperCase()}
-                      </span>
-                      <span className="flex-1 text-lg font-bold">
-                        {player.name}
-                      </span>
-                      {index === 0 && (
-                        <Crown className="size-5 text-[#ffd166]" />
-                      )}
-                      <strong className="font-mono">
-                        {player.score}{" "}
-                        {gameState.language === "zh" ? "分" : "pts"}
-                      </strong>
-                    </div>
-                  ))}
-                </div>
-                <div className="my-5 border-t border-white/10" />
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <h3 className="text-lg font-black">
-                    {gameState.language === "zh"
-                      ? "历史最快队伍"
-                      : "Fastest teams"}
-                  </h3>
-                  <span className="status-pill">
-                    {gameState.challengeLabel}
-                  </span>
-                </div>
-                <LeaderboardList
-                  entries={challengeLeaderboard}
-                  highlightId={submittedRunId}
-                  limit={3}
-                  compact
-                  language={gameState.language}
-                  className="min-h-0"
-                />
-              </section>
             </div>
+          </section>{" "}
+          <section className="rounded-2xl border border-white/8 bg-white/[.035] p-5">
+            <h2 className="mb-4 text-xl font-black">
+              {gameState.language === "zh" ? "本场排行榜" : "This game"}
+            </h2>
+            <div className="space-y-2">
+              {rankedPlayers.map((player, index) => (
+                <div
+                  key={player.playerId}
+                  className={`flex items-center gap-4 rounded-2xl border px-5 py-4 text-left ${index === 0 ? "border-[#ffd166]/40 bg-[#ffd166]/10" : "border-white/8 bg-white/[.035]"}`}
+                >
+                  <span className="w-7 text-xl font-black text-white/30">
+                    {index + 1}
+                  </span>
+                  <span
+                    className="flex size-10 items-center justify-center rounded-xl font-black"
+                    style={{ backgroundColor: player.color }}
+                  >
+                    {player.name[0]?.toUpperCase()}
+                  </span>
+                  <span className="flex-1 text-lg font-bold">
+                    {player.name}
+                  </span>
+                  {index === 0 && <Crown className="size-5 text-[#ffd166]" />}
+                  <strong className="font-mono">
+                    {player.score} {gameState.language === "zh" ? "分" : "pts"}
+                  </strong>
+                </div>
+              ))}
+            </div>
+            <div className="my-5 border-t border-white/10" />
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h3 className="text-lg font-black">
+                {gameState.language === "zh" ? "历史最快队伍" : "Fastest teams"}
+              </h3>
+              <span className="status-pill">{gameState.challengeLabel}</span>
+            </div>
+            <LeaderboardList
+              entries={challengeLeaderboard}
+              highlightId={submittedRunId}
+              limit={3}
+              compact
+              language={gameState.language}
+              className="min-h-0"
+            />
           </section>
         </div>
       </HostShell>
