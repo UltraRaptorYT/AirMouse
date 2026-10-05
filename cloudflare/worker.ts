@@ -30,6 +30,7 @@ const LEADERBOARD_PER_CHALLENGE = 10;
 const LEADERBOARD_MIN_TIME_MS = 10_000;
 const LEADERBOARD_MAX_TIME_MS = 6 * 60 * 60 * 1_000;
 const SHARED_PHOTO_TTL_MS = 24 * 60 * 60 * 1_000;
+const PRODUCTION_APP_ORIGINS = new Set(["https://bwm-air-mouse.vercel.app"]);
 
 function jsonResponse(body: unknown, status = 200) {
   return Response.json(body, {
@@ -43,6 +44,8 @@ function isOriginAllowed(request: Request, configuredOrigins?: string) {
 
   const origin = request.headers.get("origin");
   if (!origin) return false;
+
+  if (PRODUCTION_APP_ORIGINS.has(origin)) return true;
 
   return configuredOrigins
     .split(",")
