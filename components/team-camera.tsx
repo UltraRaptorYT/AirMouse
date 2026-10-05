@@ -339,7 +339,7 @@ export function TeamCamera({
                 ? "扫码下载带水印的队伍合影"
                 : "Scan to download your watermarked team photo"}
             </p>
-            <div className="mx-auto mt-3 w-full max-w-[480px] rounded-xl border border-black/5 bg-white p-2">
+            <div className="mx-auto mt-3 w-full max-w-[300px] rounded-xl border border-black/5 bg-white p-2">
               <QRCodeSVG
                 value={photoDownloadUrl}
                 size={420}
