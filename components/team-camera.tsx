@@ -131,8 +131,21 @@ export function TeamCamera({
       const logo = await loadWatermarkLogo();
       const footerHeight = Math.max(54, Math.round(canvas.width * 0.12));
       const footerTop = canvas.height - footerHeight;
-      context.fillStyle = "#ffffff";
+      context.fillStyle = "#fff8d8";
       context.fillRect(0, footerTop, canvas.width, footerHeight);
+      context.fillStyle = "#f6e48a";
+      context.beginPath();
+      context.moveTo(0, footerTop + Math.round(footerHeight * 0.08));
+      context.quadraticCurveTo(
+        canvas.width * 0.48,
+        footerTop - Math.round(footerHeight * 0.04),
+        canvas.width,
+        footerTop + Math.round(footerHeight * 0.08),
+      );
+      context.lineTo(canvas.width, canvas.height);
+      context.lineTo(0, canvas.height);
+      context.closePath();
+      context.fill();
 
       const logoSize = Math.min(
         footerHeight - 10,
@@ -142,15 +155,32 @@ export function TeamCamera({
       const logoY = footerTop + Math.round((footerHeight - logoSize) / 2);
       context.drawImage(logo, logoX, logoY, logoSize, logoSize);
 
-      const watermarkSize = Math.max(14, Math.round(footerHeight * 0.32));
-      context.fillStyle = "#17211c";
-      context.font = `700 ${watermarkSize}px system-ui, sans-serif`;
+      const watermarkX = logoX + logoSize + Math.round(canvas.width * 0.025);
+      const watermarkWidth =
+        canvas.width - watermarkX - Math.round(canvas.width * 0.05);
+      context.fillStyle = "#145642";
       context.textBaseline = "middle";
+      context.textAlign = "left";
+      context.font = `700 ${Math.max(11, Math.round(footerHeight * 0.18))}px system-ui, sans-serif`;
       context.fillText(
-        "MRD 2026 AirMouse",
-        logoX + logoSize + Math.round(canvas.width * 0.025),
-        footerTop + footerHeight / 2,
-        canvas.width - logoX - logoSize - Math.round(canvas.width * 0.05),
+        "MRD 2026 Lamrim:",
+        watermarkX,
+        footerTop + footerHeight * 0.23,
+        watermarkWidth,
+      );
+      context.font = `700 ${Math.max(11, Math.round(footerHeight * 0.21))}px system-ui, sans-serif`;
+      context.fillText(
+        "Rely on the Excellent Teachers",
+        watermarkX,
+        footerTop + footerHeight * 0.51,
+        watermarkWidth,
+      );
+      context.font = `700 ${Math.max(11, Math.round(footerHeight * 0.18))}px system-ui, sans-serif`;
+      context.fillText(
+        "亿师恩 2026：广论亲近善知识",
+        watermarkX,
+        footerTop + footerHeight * 0.79,
+        watermarkWidth,
       );
 
       let snapshot = "";

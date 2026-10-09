@@ -134,7 +134,7 @@ export function HomeTopTeams() {
       }
     }
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 30_000);
+    const timer = window.setInterval(() => void refresh(), 120_000);
     return () => { controller.abort(); window.clearInterval(timer); };
   }, []);
   return (

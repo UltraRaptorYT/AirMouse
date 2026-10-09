@@ -46,8 +46,8 @@ const HORIZONTAL_AIM_RANGE_DEGREES = 32;
 const VERTICAL_AIM_RANGE_DEGREES = 24;
 // Light sensor smoothing only; the host interpolates per frame, so heavy smoothing here just adds lag.
 const AIM_SMOOTHING = 0.5;
-// ~60 packets/sec (matches the sensor rate). Each packet is ~50 bytes.
-const SEND_INTERVAL_MS = 16;
+// 20 updates/sec keeps motion responsive while cutting WebSocket request usage by two-thirds.
+const SEND_INTERVAL_MS = 50;
 const AIM_CHANGE_THRESHOLD = 0.002;
 
 function makePlayerId(roomCode: string) {
@@ -250,7 +250,6 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           };
           socketRef.current?.send({ type: "join", payload: presence });
         }
-        socketRef.current?.send({ type: "request-game-state" });
       },
     });
     socketRef.current = socket;
@@ -362,7 +361,6 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
     joinedRef.current = true;
     setJoined(true);
     sessionStorage.setItem(`airmouse-joined-${roomCode}`, "true");
-    socket.send({ type: "request-game-state" });
   }
 
   async function enableMotion() {
