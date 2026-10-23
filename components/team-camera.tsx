@@ -59,6 +59,28 @@ function loadWatermarkLogo() {
   });
 }
 
+function encodePhotoWithinLimit(canvas: HTMLCanvasElement) {
+  const scales = [1, 0.85, 0.72, 0.61, 0.52, 0.44, 0.37];
+  const qualities = [0.82, 0.72, 0.62, 0.52, 0.42];
+
+  for (const scale of scales) {
+    const output = document.createElement("canvas");
+    output.width = Math.max(1, Math.round(canvas.width * scale));
+    output.height = Math.max(1, Math.round(canvas.height * scale));
+    const context = output.getContext("2d");
+    if (!context)
+      throw new Error("Could not compress the photo. Please try again.");
+    context.drawImage(canvas, 0, 0, output.width, output.height);
+
+    for (const quality of qualities) {
+      const snapshot = output.toDataURL("image/jpeg", quality);
+      if (snapshot.length <= MAX_TEAM_PHOTO_LENGTH) return snapshot;
+    }
+  }
+
+  throw new Error("The photo is too large. Try again with a simpler background.");
+}
+
 export function TeamCamera({
   rank,
   language = "en",
@@ -170,16 +192,7 @@ export function TeamCamera({
         watermarkWidth,
       );
 
-      let snapshot = "";
-      for (const quality of [0.8, 0.65, 0.5, 0.35, 0.2]) {
-        snapshot = canvas.toDataURL("image/jpeg", quality);
-        if (snapshot.length <= MAX_TEAM_PHOTO_LENGTH) break;
-      }
-      if (snapshot.length > MAX_TEAM_PHOTO_LENGTH) {
-        throw new Error(
-          "The photo is too large. Try again with a simpler background.",
-        );
-      }
+      const snapshot = encodePhotoWithinLimit(canvas);
       autoSaveRequestedRef.current = false;
       setPhoto(snapshot);
     } catch (captureError) {
