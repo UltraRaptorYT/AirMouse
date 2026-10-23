@@ -1324,13 +1324,9 @@ export default function ScreenPage() {
               : "Read, recite and memorise"}
           </h1>
           <div
-            className={`mt-7 max-h-[55vh] w-full max-w-6xl space-y-4 overflow-y-auto px-4 text-left font-semibold leading-relaxed text-white/85 ${gameState.language === "zh" ? "text-[clamp(1.5rem,3vw,2.5rem)]" : "text-[clamp(1.25rem,2vw,2rem)]"}`}
+            className={`mt-7 max-h-[55vh] w-full overflow-y-auto whitespace-pre-line px-4 text-left text-balance font-semibold leading-[1.7] text-white/85 ${gameState.language === "zh" ? "text-[clamp(2.4rem,3vw,2.75rem)]" : "text-[clamp(1.35rem,1.8vw,2rem)]"}`}
           >
-            {memoriseParagraphs.map((paragraph, index) => (
-              <p key={index} className="whitespace-pre-line text-pretty">
-                {paragraph}
-              </p>
-            ))}
+            {memoriseParagraphs.join("\n\n")}
           </div>
           <p className="mt-8 text-sm font-bold uppercase tracking-[.18em] text-white/35">
             {gameState.language === "zh"
