@@ -30,6 +30,7 @@ import {
 import { leaderboardUrl, rankTeams } from "@/lib/realtime/leaderboard";
 import {
   toPublicQuestion,
+  type Challenge,
   type ChallengeNumber,
   type GameLanguage,
   type PublicQuestion,
@@ -339,6 +340,23 @@ export default function ScreenPage() {
       });
     },
     [broadcastState, clearRound],
+  );
+
+  const startMemorise = useCallback(
+    (challenge: Challenge) => {
+      broadcastState({
+        phase: "memorise",
+        language: challenge.language,
+        challenge: challenge.number,
+        challengeLabel: challenge.label,
+        memoriseText: challenge.memoriseText,
+        questionIndex: 0,
+        questionCount: challenge.questions.length,
+        phaseEndsAt: Date.now() + MEMORISE_MS,
+        penaltyMs: 0,
+      });
+    },
+    [broadcastState],
   );
 
   const finishTimedOutMatch = useCallback(() => {
@@ -806,38 +824,37 @@ export default function ScreenPage() {
       if (progress < 1 || selectionLockedRef.current) return;
       selectionLockedRef.current = true;
       if (gameStateRef.current.phase === "language") {
-        broadcastState({
-          phase: "challenge",
-          language: value as GameLanguage,
-          questionIndex: 0,
-          questionCount: 0,
-        });
+        const language = value as GameLanguage;
+        const availableChallenges = getChallenges(language);
+        if (availableChallenges.length === 1) {
+          startMemorise(availableChallenges[0]);
+        } else {
+          broadcastState({
+            phase: "challenge",
+            language,
+            questionIndex: 0,
+            questionCount: 0,
+          });
+        }
       } else {
         const challenge = getChallenge(
           gameStateRef.current.language!,
           Number(value) as ChallengeNumber,
         );
         if (!challenge) return;
-        broadcastState({
-          phase: "memorise",
-          language: challenge.language,
-          challenge: challenge.number,
-          challengeLabel: challenge.label,
-          memoriseText: challenge.memoriseText,
-          questionIndex: 0,
-          questionCount: challenge.questions.length,
-          phaseEndsAt: Date.now() + MEMORISE_MS,
-          penaltyMs: 0,
-        });
+        startMemorise(challenge);
       }
     }, 100);
     return () => {
       window.clearTimeout(clearDwellTimer);
       window.clearInterval(timer);
     };
-  }, [broadcastState, gameState.phase]);
+  }, [broadcastState, gameState.phase, startMemorise]);
 
   const activeAnswerCount = gameState.question?.answers.length ?? 0;
+  const challengeStepNeeded = (["en", "zh"] as const).some(
+    (language) => getChallenges(language).length > 1,
+  );
   const solvedCount = Object.values(solvedAnswers).filter(
     (entry) => entry.correct,
   ).length;
@@ -1201,7 +1218,9 @@ export default function ScreenPage() {
           <div className="text-center">
             <span className="eyebrow">
               {languageStep
-                ? "Step 1 of 2 · 第一步，共两步"
+                ? challengeStepNeeded
+                  ? "Step 1 of 2 · 第一步，共两步"
+                  : "Step 1 of 1"
                 : gameState.language === "zh"
                   ? "第二步，共两步"
                   : "Step 2 of 2"}
@@ -1286,6 +1305,9 @@ export default function ScreenPage() {
 
   if (gameState.phase === "memorise") {
     const remaining = Math.max(0, (gameState.phaseEndsAt ?? now) - now);
+    const memoriseParagraphs = (gameState.memoriseText ?? "").split(
+      /\r?\n\s*\r?\n/,
+    );
     return (
       <HostShell roomCode={roomCode} status={status}>
         <section className="host-panel flex flex-1 flex-col items-center justify-center overflow-hidden p-7 text-center sm:p-10">
@@ -1301,11 +1323,15 @@ export default function ScreenPage() {
               ? "阅读、背诵并记忆"
               : "Read, recite and memorise"}
           </h1>
-          <p
-            className={`mt-8 max-w-7xl text-balance font-semibold leading-[1.65] text-white/85 ${gameState.language === "zh" ? "text-[clamp(2.4rem,4vw,4rem)]" : "text-[clamp(1.5rem,2.4vw,2.5rem)]"}`}
+          <div
+            className={`mt-7 max-h-[55vh] w-full max-w-6xl space-y-4 overflow-y-auto px-4 text-left font-semibold leading-relaxed text-white/85 ${gameState.language === "zh" ? "text-[clamp(1.5rem,3vw,2.5rem)]" : "text-[clamp(1.25rem,2vw,2rem)]"}`}
           >
-            {gameState.memoriseText}
-          </p>
+            {memoriseParagraphs.map((paragraph, index) => (
+              <p key={index} className="whitespace-pre-line text-pretty">
+                {paragraph}
+              </p>
+            ))}
+          </div>
           <p className="mt-8 text-sm font-bold uppercase tracking-[.18em] text-white/35">
             {gameState.language === "zh"
               ? "时间结束后将自动开始答题"
@@ -1765,15 +1791,17 @@ function QuestionStage({
             {isChinese ? "+25秒" : "+25s"}
           </span>
         </div>
-        <div className="mt-3 grid shrink-0 grow grid-cols-2 content-start gap-2 xl:grid-cols-3">
+        <div className="mt-3 grid min-w-0 shrink-0 grow grid-cols-2 content-start gap-2 xl:grid-cols-3">
           {poolAnswers.map((answer) => (
             <div
               key={answer.id}
               data-answer-card={answer.id}
-              className={`flex min-h-16 cursor-none items-center rounded-xl border border-black/8 bg-white px-3 py-3 font-black leading-snug text-[#111814] shadow-sm ${isChinese ? "text-[clamp(1.4rem,1.6vw,1.9rem)]" : "text-[clamp(.9rem,1vw,1.1rem)]"}`}
+              className={`flex min-h-16 min-w-0 cursor-none items-center gap-2 rounded-xl border border-black/8 bg-white px-3 py-3 font-black leading-snug text-[#111814] shadow-sm ${isChinese ? "text-[clamp(1.2rem,1.4vw,1.75rem)]" : "text-[clamp(.85rem,.95vw,1.05rem)]"}`}
             >
-              <TbHandGrab className="mr-2 size-6 shrink-0 text-[#e56b35]" />
-              {answer.label}
+              <TbHandGrab className="size-6 shrink-0 text-[#e56b35]" />
+              <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                {answer.label}
+              </span>
             </div>
           ))}
           {complete && (

@@ -57,6 +57,8 @@ challenge has `id`, `language`, `number`, `label`, `source`, `memoriseText`, and
 with `makeQuestion(id, prompt, parts, instruction)`. In a prompt, `[1]`, `[2]`,
 etc. refer to phrases in `parts` in the correct order. Give each challenge and
 segment a unique ID.
+Use a template literal for `memoriseText`; blank lines split it into separate
+paragraphs on the host screen, and single line breaks are preserved.
 
 For motion testing on a physical phone, use the deployed HTTPS frontend and
 Worker. Mobile browsers generally require HTTPS to grant motion sensor access.
