@@ -9,14 +9,12 @@ import {
   CircleAlert,
   Crosshair,
   Clock3,
-  Gamepad2,
   Languages,
   LoaderCircle,
   Move3d,
   Sparkles,
   Trophy,
   UserRound,
-  Wifi,
   X,
 } from "lucide-react";
 
@@ -464,7 +462,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
   if (!joined) {
     return (
-      <PhoneShell roomCode={roomCode} status={status}>
+      <PhoneShell>
         <div className="flex flex-1 flex-col justify-center py-8">
           <div className="mb-8">
             <span className="player-eyebrow">Room found</span>
@@ -556,7 +554,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
   if (gameState.phase === "finished" && gameState.timedOut) {
     return (
-      <PhoneShell roomCode={roomCode} status={status} score={totalScore}>
+      <PhoneShell>
         <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
           <div className="flex size-20 items-center justify-center rounded-[1.7rem] bg-[#e56b35] text-white shadow-[0_18px_50px_rgba(216,155,34,.25)]">
             <Trophy className="size-9" />
@@ -587,7 +585,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
   if (gameState.phase === "finished") {
     return (
-      <PhoneShell roomCode={roomCode} status={status} score={totalScore}>
+      <PhoneShell>
         <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
           <div className="flex size-20 items-center justify-center rounded-[1.7rem] bg-[#ffd166] text-[#171922] shadow-[0_18px_50px_rgba(216,155,34,.25)]">
             <Trophy className="size-9" />
@@ -614,7 +612,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
   if (sensorStatus === "active" && !calibrated) {
     return (
-      <PhoneShell roomCode={roomCode} status={status} score={totalScore}>
+      <PhoneShell>
         <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
           <div className="relative flex size-36 items-center justify-center">
             <span className="absolute inset-0 animate-ping rounded-full bg-[#ff6b4a]/15" />
@@ -650,7 +648,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
 
   if (gameState.phase === "lobby") {
     return (
-      <PhoneShell roomCode={roomCode} status={status} score={totalScore}>
+      <PhoneShell>
         <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
           <div
             className="flex size-20 items-center justify-center rounded-[1.7rem] text-3xl font-black text-white shadow-[0_18px_50px_rgba(0,0,0,.12)]"
@@ -727,7 +725,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
           : "A majority of players must stay in the same option on the shared screen for 5 seconds.";
 
     return (
-      <PhoneShell roomCode={roomCode} status={status} score={totalScore}>
+      <PhoneShell>
         <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
           <div
             className={`flex size-20 items-center justify-center rounded-[1.7rem] text-white shadow-[0_18px_50px_rgba(0,0,0,.12)] ${isMemorising ? "bg-[#d89b22]" : "bg-[#5c7cfa]"}`}
@@ -776,7 +774,7 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   if (!question) return null;
 
   return (
-    <PhoneShell roomCode={roomCode} status={status} score={totalScore}>
+    <PhoneShell>
       <div className="flex flex-1 flex-col pb-6 pt-5">
         <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[.15em] text-[#90929a]">
           <span>{gameState.challengeLabel ?? "Passage"}</span>
@@ -900,45 +898,10 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
   );
 }
 
-function PhoneShell({
-  roomCode,
-  status,
-  score,
-  children,
-}: {
-  roomCode: string;
-  status: ConnectionStatus;
-  score?: number;
-  children: React.ReactNode;
-}) {
+function PhoneShell({ children }: { children: React.ReactNode }) {
   return (
     <main className="light-mode player-shell min-h-dvh bg-[#f4f8f5] px-4 text-[#171922]">
       <div className="mx-auto flex min-h-dvh w-full max-w-lg flex-col">
-        <header className="flex items-center justify-between border-b border-black/[.06] py-4">
-          <div className="flex items-center gap-2.5">
-            <span className="flex size-9 items-center justify-center rounded-xl bg-[#ff6b4a] text-white">
-              <Gamepad2 className="size-4.5" />
-            </span>
-            <strong className="tracking-[-.03em]">AirMouse</strong>
-          </div>
-          <div className="flex items-center gap-2.5">
-            {typeof score === "number" && score > 0 && (
-              <span className="rounded-lg bg-white px-2.5 py-1.5 font-mono text-xs font-bold shadow-sm">
-                {score.toLocaleString()} pts
-              </span>
-            )}
-            <span className="flex items-center gap-1.5 rounded-lg border border-black/8 bg-white/60 px-2.5 py-1.5 font-mono text-xs font-bold tracking-[.12em]">
-              {status === "connecting" || status === "reconnecting" ? (
-                <LoaderCircle className="size-3 animate-spin" />
-              ) : status === "error" ? (
-                <CircleAlert className="size-3 text-red-500" />
-              ) : (
-                <Wifi className="size-3 text-[#15a97b]" />
-              )}
-              {roomCode}
-            </span>
-          </div>
-        </header>
         {children}
       </div>
     </main>

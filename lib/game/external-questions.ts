@@ -49,7 +49,11 @@ export const externalChallenges: Challenge[] = [
     segments: [
       makeQuestion(
         "ext-en-3-s1",
-        "Here the teaching that I will explain is how [1] are led to [2] by way of the [3] that (1) contain the key points of [4], (2) are the [5] forged by two great trailblazers, [6], (3) are the [7] progressing to the [8], and (4) fully comprise [9] practiced by the [10].",
+        `Here the teaching that I will explain is how [1] are led to [2] by way of the [3] that \\br
+(1) contain the key points of [4], \\br
+(2) are the [5] forged by two great trailblazers, [6], \\br
+(3) are the [7] progressing to the [8], and \\br
+(4) fully comprise [9] practiced by the [10].`,
         [
           "fortunate beings",
           "buddhahood",
