@@ -41,10 +41,10 @@ export const externalChallenges: Challenge[] = [
     number: 3,
     label: "English Challenge 3",
     source: "Stages of the Path to Enlightenment",
-    memoriseText: `Here the teaching that I will explain is how fortunate beings are led to buddhahood by way of the stages of the path to enlightenment that
-(1) contain the key points of all of the Conqueror's scriptures,
-(2) are the pathways forged by two great trailblazers, Nagarjuna and Asanga,
-(3) are the system for supreme beings progressing to the state of omniscience, and
+    memoriseText: String.raw`Here the teaching that I will explain is how fortunate beings are led to buddhahood by way of the stages of the path to enlightenment that\br
+(1) contain the key points of all of the Conqueror's scriptures,\br
+(2) are the pathways forged by two great trailblazers, Nagarjuna and Asanga,\br
+(3) are the system for supreme beings progressing to the state of omniscience, and\br
 (4) fully comprise all the stages practiced by the three types of persons.`,
     segments: [
       makeQuestion(

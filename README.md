@@ -57,8 +57,14 @@ challenge has `id`, `language`, `number`, `label`, `source`, `memoriseText`, and
 with `makeQuestion(id, prompt, parts, instruction)`. In a prompt, `[1]`, `[2]`,
 etc. refer to phrases in `parts` in the correct order. Give each challenge and
 segment a unique ID.
-Use a template literal for `memoriseText`; blank lines split it into separate
-paragraphs on the host screen, and single line breaks are preserved.
+Use `String.raw` for `memoriseText` and put `\br` wherever you want a line
+break. Blank lines still add paragraph spacing. For example:
+
+```ts
+memoriseText: String.raw`Opening line\br
+1) First point\br
+2) Second point`,
+```
 
 For motion testing on a physical phone, use the deployed HTTPS frontend and
 Worker. Mobile browsers generally require HTTPS to grant motion sensor access.

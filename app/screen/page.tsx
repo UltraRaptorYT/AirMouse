@@ -1265,13 +1265,7 @@ export default function ScreenPage() {
                   <span className="mt-2 text-xl leading-relaxed text-white/65 sm:text-2xl">
                     {choice.subtitle}
                   </span>
-                  <span className="mt-3 text-base font-bold text-white/60 sm:text-lg">
-                    {languageStep
-                      ? `Votes ${voteCount}/${players.length} · 投票 ${voteCount}/${players.length}`
-                      : gameState.language === "zh"
-                        ? `投票 ${voteCount}/${players.length} · 多数需 ${requiredVotes} 人`
-                        : `Votes ${voteCount}/${players.length} · majority ${requiredVotes}`}
-                  </span>
+                  <span aria-hidden="true" className="mt-3 h-6" />
                   <div className="absolute inset-x-0 bottom-0 h-3 bg-white/8">
                     <div
                       className="h-full bg-[#44d79b] transition-[width] duration-100"
@@ -1280,15 +1274,7 @@ export default function ScreenPage() {
                       }}
                     />
                   </div>
-                  {active && (
-                    <span className="mt-5 font-mono text-2xl font-bold text-[#44d79b]">
-                      {gameState.language === "zh"
-                        ? "确认倒数 "
-                        : "Confirming in "}
-                      {Math.max(1, Math.ceil(5 - dwell.progress * 5))}
-                      {gameState.language === "zh" ? " 秒" : "s"}
-                    </span>
-                  )}
+                  <span aria-hidden="true" className="mt-5 h-8" />
                 </div>
               );
             })}
@@ -1305,9 +1291,11 @@ export default function ScreenPage() {
 
   if (gameState.phase === "memorise") {
     const remaining = Math.max(0, (gameState.phaseEndsAt ?? now) - now);
-    const memoriseParagraphs = (gameState.memoriseText ?? "").split(
-      /\r?\n\s*\r?\n/,
+    const memoriseText = (gameState.memoriseText ?? "").replace(
+      /\\br(?:\r?\n)?/gi,
+      "\n",
     );
+    const memoriseParagraphs = memoriseText.split(/\r?\n\s*\r?\n/);
     return (
       <HostShell roomCode={roomCode} status={status}>
         <section className="host-panel flex flex-1 flex-col items-center justify-center overflow-hidden p-7 text-center sm:p-10">
@@ -1324,9 +1312,13 @@ export default function ScreenPage() {
               : "Read, recite and memorise"}
           </h1>
           <div
-            className={`mt-7 max-h-[55vh] w-full overflow-y-auto whitespace-pre-line px-4 text-left text-balance font-semibold leading-[1.7] text-white/85 ${gameState.language === "zh" ? "text-[clamp(2.4rem,3vw,2.75rem)]" : "text-[clamp(1.35rem,1.8vw,2rem)]"}`}
+            className={`mt-7 max-h-[55vh] w-full max-w-6xl space-y-4 overflow-y-auto px-4 text-left font-semibold leading-relaxed text-white/85 ${gameState.language === "zh" ? "text-[clamp(1.5rem,3vw,2.5rem)]" : "text-[clamp(1.25rem,2vw,2rem)]"}`}
           >
-            {memoriseParagraphs.join("\n\n")}
+            {memoriseParagraphs.map((paragraph, index) => (
+              <p key={index} className="whitespace-pre-line text-pretty">
+                {paragraph}
+              </p>
+            ))}
           </div>
           <p className="mt-8 text-sm font-bold uppercase tracking-[.18em] text-white/35">
             {gameState.language === "zh"
