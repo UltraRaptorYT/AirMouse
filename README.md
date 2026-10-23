@@ -57,8 +57,9 @@ challenge has `id`, `language`, `number`, `label`, `source`, `memoriseText`, and
 with `makeQuestion(id, prompt, parts, instruction)`. In a prompt, `[1]`, `[2]`,
 etc. refer to phrases in `parts` in the correct order. Give each challenge and
 segment a unique ID.
-Use `String.raw` for `memoriseText` and put `\br` wherever you want a line
-break. Blank lines still add paragraph spacing. For example:
+Use `String.raw` for `memoriseText` or a `makeQuestion` prompt and put `\br`
+wherever you want a line break. Blank lines in `memoriseText` still add
+paragraph spacing. For example:
 
 ```ts
 memoriseText: String.raw`Opening line\br

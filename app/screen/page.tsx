@@ -1274,7 +1274,15 @@ export default function ScreenPage() {
                       }}
                     />
                   </div>
-                  <span aria-hidden="true" className="mt-5 h-8" />
+                  {active ? (
+                    <span className="mt-5 font-mono text-2xl font-bold text-[#44d79b]">
+                      {gameState.language === "zh" ? "确认倒数 " : "Confirming in "}
+                      {Math.max(1, Math.ceil(5 - dwell.progress * 5))}
+                      {gameState.language === "zh" ? " 秒" : "s"}
+                    </span>
+                  ) : (
+                    <span aria-hidden="true" className="mt-5 h-8" />
+                  )}
                 </div>
               );
             })}
@@ -1593,7 +1601,7 @@ function QuestionStage({
   );
   const isChinese = language === "zh";
   // Prompt is the whole passage; every `[n]` becomes an inline drop slot for targets[n - 1].
-  const tokens = question.prompt.split(/(\[\d+\])/g).filter(Boolean);
+  const tokens = question.prompt.split(/(\[\d+\]|\\br)/g).filter(Boolean);
   const poolAnswers = question.answers.filter(
     (answer) => !solvedAnswers[answer.id] && !heldIds.has(answer.id),
   );
@@ -1674,6 +1682,7 @@ function QuestionStage({
           className={`mt-4 shrink-0 grow text-balance font-semibold leading-[1.7] text-[#17211c] ${isChinese ? "text-[clamp(2.4rem,3vw,2.75rem)]" : "text-[clamp(1.35rem,1.8vw,2rem)]"}`}
         >
           {tokens.map((token, index) => {
+            if (token === "\\br") return <br key={`break-${index}`} />;
             const match = token.match(/^\[(\d+)\]$/);
             if (!match) return <span key={index}>{token}</span>;
             const target = question.targets[Number(match[1]) - 1];
