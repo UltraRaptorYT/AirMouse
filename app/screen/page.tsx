@@ -22,10 +22,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { TeamCamera, type PhotoSaveState } from "@/components/team-camera";
 import { TeamPhoto, TopTeams } from "@/components/top-teams";
-import { leaderboardUrl, rankTeams } from "@/lib/realtime/leaderboard";
 import {
   getChallenge,
+  getChallenges,
   getQuestion,
+} from "@/lib/game/question-bank";
+import { leaderboardUrl, rankTeams } from "@/lib/realtime/leaderboard";
+import {
   toPublicQuestion,
   type ChallengeNumber,
   type GameLanguage,
@@ -1187,24 +1190,11 @@ export default function ScreenPage() {
             subtitle: "中文题目",
           },
         ]
-      : [
-          {
-            value: "1",
-            title: gameState.language === "zh" ? "挑战一" : "Challenge 1",
-            subtitle:
-              gameState.language === "zh"
-                ? "《十法经》"
-                : "The Ten Teaching Sūtra",
-          },
-          {
-            value: "2",
-            title: gameState.language === "zh" ? "挑战二" : "Challenge 2",
-            subtitle:
-              gameState.language === "zh"
-                ? "《华严经》"
-                : "The Array of Stalks Sūtra",
-          },
-        ];
+      : getChallenges(gameState.language ?? "en").map((challenge) => ({
+          value: String(challenge.number),
+          title: challenge.label,
+          subtitle: challenge.source,
+        }));
     return (
       <HostShell roomCode={roomCode} status={status}>
         <section className="host-panel flex flex-1 flex-col p-7 sm:p-10">
@@ -1232,7 +1222,12 @@ export default function ScreenPage() {
             </p>
           </div>
           <div className="mt-8 grid flex-1 gap-6 md:grid-cols-2">
-            {choices.map((choice) => {
+            {choices.length === 0 ? (
+              <p className="self-center text-center text-lg text-white/65">
+                No challenges are available in the selected question bank for
+                this language yet.
+              </p>
+            ) : choices.map((choice) => {
               const active = dwell?.value === choice.value;
               const voteCount = choiceVotes[choice.value] ?? 0;
               const requiredVotes = Math.floor(players.length / 2) + 1;

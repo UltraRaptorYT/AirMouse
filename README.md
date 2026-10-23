@@ -25,7 +25,9 @@ Add the following line to `.env.local`:
 NEXT_PUBLIC_AIRMOUSE_WS_URL=ws://localhost:8787
 ```
 
-Start the realtime service and the Next.js app in separate terminals:
+Start the local WebSocket Worker and the Next.js app in separate terminals.
+The Worker runs locally; you do not need to deploy it or create a Cloudflare
+account to test a room on this computer.
 
 ```bash
 pnpm realtime:dev
@@ -35,10 +37,29 @@ pnpm realtime:dev
 pnpm dev
 ```
 
-Then open [http://localhost:3000/screen](http://localhost:3000/screen).
+Then open [http://localhost:3000/screen](http://localhost:3000/screen) as the
+host. Open a second browser tab at [http://localhost:3000](http://localhost:3000)
+and join the room using the code shown on the host screen. Both tabs connect to
+the local Worker at `ws://localhost:8787`.
 
-For motion testing on a physical phone, deploy the Worker and frontend first.
-Mobile sensor permissions generally require an HTTPS page.
+In PowerShell, if `pnpm` is blocked by the script execution policy, run the
+commands as `pnpm.cmd realtime:dev` and `pnpm.cmd dev`.
+
+## Question banks
+
+Choose the active bank with `NEXT_PUBLIC_QUESTION_BANK` in `.env.local`:
+`internal` or `external`. The setting is read at build time, so set the same
+variable in Vercel and redeploy to switch the hosted site. If unset or invalid,
+the app uses the external bank. The internal bank is in `lib/game/questions.ts`;
+external bank entries are defined in `lib/game/external-questions.ts`. Each
+challenge has `id`, `language`, `number`, `label`, `source`, `memoriseText`, and
+`segments`. Build each segment
+with `makeQuestion(id, prompt, parts, instruction)`. In a prompt, `[1]`, `[2]`,
+etc. refer to phrases in `parts` in the correct order. Give each challenge and
+segment a unique ID.
+
+For motion testing on a physical phone, use the deployed HTTPS frontend and
+Worker. Mobile browsers generally require HTTPS to grant motion sensor access.
 
 ## Deployment
 
