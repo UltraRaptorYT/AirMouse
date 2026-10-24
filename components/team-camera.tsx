@@ -61,7 +61,7 @@ function loadWatermarkLogo() {
 }
 
 function encodePhotoWithinLimit(canvas: HTMLCanvasElement) {
-  const scales = [1, 0.9, 0.8, 0.7, 0.6, 0.5];
+  const scales = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3];
   const qualities = [0.92, 0.88, 0.84, 0.8, 0.76];
 
   for (const scale of scales) {
@@ -154,6 +154,7 @@ export function TeamCamera({
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       context.setTransform(1, 0, 0, 1, 0, 0);
       const logo = await loadWatermarkLogo();
+      const externalWatermark = watermarkMode === "external";
       const footerHeight = Math.max(54, Math.round(canvas.width * 0.12));
       const footerTop = canvas.height - footerHeight;
       context.fillStyle = "#ffffff";
@@ -174,17 +175,19 @@ export function TeamCamera({
       context.textBaseline = "middle";
       context.textAlign = "left";
       if (watermarkMode === "external") {
-        context.font = `700 ${Math.max(11, Math.round(footerHeight * 0.2))}px system-ui, sans-serif`;
+        const titleSize = Math.max(18, Math.round(canvas.width * 0.032));
+        context.fillStyle = "#17211c";
+        context.font = `700 ${titleSize}px system-ui, sans-serif`;
         context.fillText(
           "Master Remembrance Day Exhibition 2026",
           watermarkX,
-          footerTop + footerHeight * 0.37,
+          footerTop + footerHeight * 0.34,
           watermarkWidth,
         );
         context.fillText(
           "忆师恩教育展 2026",
           watermarkX,
-          footerTop + footerHeight * 0.7,
+          footerTop + footerHeight * 0.68,
           watermarkWidth,
         );
       } else {

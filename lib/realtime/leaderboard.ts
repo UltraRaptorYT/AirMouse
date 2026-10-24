@@ -1,6 +1,6 @@
 import type { LeaderboardEntry } from "./types";
 
-export const MAX_TEAM_PHOTO_LENGTH = 512_000;
+export const MAX_TEAM_PHOTO_LENGTH = 1_000_000;
 
 export function rankTeams(entries: LeaderboardEntry[]) {
   return [...entries].sort(
