@@ -71,6 +71,27 @@ function photoDownloadFileName(timestamp: number) {
   return `BWM MRD 2026 AirMouse - ${part("year")}-${part("month")}-${part("day")} ${part("hour")}-${part("minute")}-${part("second")} SGT.jpg`;
 }
 
+function photoStorageTimestamp(timestamp: number) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Singapore",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(timestamp));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? "00";
+  const milliseconds = String(new Date(timestamp).getUTCMilliseconds()).padStart(3, "0");
+  return `${part("year")}${part("month")}${part("day")}-${part("hour")}${part("minute")}${part("second")}-${milliseconds}`;
+}
+
+function isSharedPhotoId(id: string) {
+  return id.startsWith("s-") || /^\d{8}-\d{6}-\d{3}-s-/.test(id);
+}
+
 function parseJpegDataUrl(photo: unknown): Uint8Array | null {
   if (
     typeof photo !== "string" || photo.length > MAX_TEAM_PHOTO_LENGTH ||
@@ -194,6 +215,10 @@ export class Leaderboard extends DurableObject<Env> {
     return (await this.ctx.storage.get<LeaderboardEntry[]>("entries")) ?? [];
   }
 
+  async getPhotoKey(runId: string): Promise<string | undefined> {
+    return this.ctx.storage.get<string>(`photo-key:${runId}`);
+  }
+
   async clear(): Promise<number> {
     const entryCount = (await this.list()).length;
     await this.ctx.storage.deleteAll();
@@ -241,10 +266,12 @@ export class Leaderboard extends DurableObject<Env> {
     const rank = entries.filter((item) => item.challengeId === entry.challengeId)
       .findIndex((item) => item.id === runId);
     if (rank < 0 || rank > 2) return "Your team is no longer in the top three.";
-    if (entry.hasPhoto && await this.env.PHOTOS.head(`photos/leaderboard/${runId}.jpg`)) return null;
+    const existingPhotoKey = await this.getPhotoKey(runId);
+    if (entry.hasPhoto && await this.env.PHOTOS.head(existingPhotoKey ?? `photos/leaderboard/${runId}.jpg`)) return null;
 
     const createdAt = Date.now();
-    await this.env.PHOTOS.put(`photos/leaderboard/${runId}.jpg`, bytes, {
+    const photoKey = `photos/leaderboard/${photoStorageTimestamp(createdAt)}-${runId}.jpg`;
+    await this.env.PHOTOS.put(photoKey, bytes, {
       httpMetadata: { contentType: "image/jpeg" },
       customMetadata: {
         createdAt: String(createdAt),
@@ -260,7 +287,7 @@ export class Leaderboard extends DurableObject<Env> {
       const latestEntry = latest.find((item) => item.id === runId);
       if (!latestEntry || await txn.get<string>(`owner:${runId}`) !== ownerId) return;
       latestEntry.hasPhoto = true;
-      await txn.put("entries", latest);
+      await txn.put({ entries: latest, [`photo-key:${runId}`]: photoKey });
     });
     return null;
   }
@@ -692,10 +719,10 @@ export default {
       } catch {
         return respond({ error: "Invalid photo upload." }, 400);
       }
-      const id = `s-${crypto.randomUUID()}`;
+      const createdAt = Date.now();
+      const id = `${photoStorageTimestamp(createdAt)}-s-${crypto.randomUUID()}`;
       const bytes = parseJpegDataUrl(body.photo);
       if (!bytes) return respond({ error: "Please take a new photo and try again." }, 400);
-      const createdAt = Date.now();
       await env.PHOTOS.put(`photos/shared/${id}.jpg`, bytes, {
         httpMetadata: { contentType: "image/jpeg" },
         customMetadata: { createdAt: String(createdAt), kind: "shared" },
@@ -706,9 +733,13 @@ export default {
     const photoMatch = url.pathname.match(/^\/leaderboard\/photos\/([A-Za-z0-9-]{1,64})(\/download)?$/);
     if (photoMatch && request.method === "GET") {
       const id = photoMatch[1];
-      const object = id.startsWith("s-")
+      const sharedPhoto = isSharedPhotoId(id);
+      const leaderboardPhotoKey = sharedPhoto
+        ? undefined
+        : await env.LEADERBOARD.getByName(LEADERBOARD_ID).getPhotoKey(id);
+      const object = sharedPhoto
         ? await env.PHOTOS.get(`photos/shared/${id}.jpg`)
-        : await env.PHOTOS.get(`photos/leaderboard/${id}.jpg`);
+        : await env.PHOTOS.get(leaderboardPhotoKey ?? `photos/leaderboard/${id}.jpg`);
       if (object) {
         const createdAt = Number(object.customMetadata?.createdAt) || object.uploaded.getTime();
         const headers = new Headers();
@@ -722,7 +753,7 @@ export default {
       }
       // Existing share links created before the R2 archive remain usable until their old 24-hour expiry.
       {
-        const legacy = id.startsWith("s-")
+        const legacy = sharedPhoto
           ? await env.SHARED_PHOTOS.getByName(id).legacyPhotoDetails()
           : await env.LEADERBOARD.getByName(LEADERBOARD_ID).legacyPhotoDetails(id);
         if (legacy) {

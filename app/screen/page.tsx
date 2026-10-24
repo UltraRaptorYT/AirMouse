@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { TbHandGrab, TbHandStop } from "react-icons/tb";
 import {
+  Camera,
   Check,
   Clock3,
   Crown,
@@ -23,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { TeamCamera, type PhotoSaveState } from "@/components/team-camera";
 import { TeamPhoto, TopTeams } from "@/components/top-teams";
 import {
+  ACTIVE_QUESTION_BANK,
   getChallenge,
   getChallenges,
   getQuestion,
@@ -162,6 +164,7 @@ export default function ScreenPage() {
   const [photoSaveState, setPhotoSaveState] = useState<PhotoSaveState>({
     status: "idle",
   });
+  const [photoTestOpen, setPhotoTestOpen] = useState(false);
   const photoRunRef = useRef<string | null>(null);
   // The id of the run this host submitted for the current finish, so we can highlight it and never double-submit.
   const [submittedRunId, setSubmittedRunId] = useState<string | null>(null);
@@ -990,6 +993,29 @@ export default function ScreenPage() {
     return () => window.clearTimeout(timer);
   }, [photoSaveState.status]);
 
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development" || gameState.phase !== "lobby") return;
+    function handlePhotoTestShortcut(event: KeyboardEvent) {
+      if (event.key.toLowerCase() === "escape" && photoTestOpen) {
+        setPhotoTestOpen(false);
+        return;
+      }
+      if (event.key.toLowerCase() !== "j" || photoTestOpen) return;
+      if (
+        event.target instanceof HTMLElement &&
+        (event.target.isContentEditable ||
+          ["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName))
+      ) {
+        return;
+      }
+      event.preventDefault();
+      setPhotoSaveState({ status: "idle" });
+      setPhotoTestOpen(true);
+    }
+    window.addEventListener("keydown", handlePhotoTestShortcut);
+    return () => window.removeEventListener("keydown", handlePhotoTestShortcut);
+  }, [gameState.phase, photoTestOpen]);
+
   function saveTeamPhoto(photo: string) {
     const requestId = submittedRunId ?? `shared-${Date.now()}`;
     photoRunRef.current = requestId;
@@ -1112,6 +1138,20 @@ export default function ScreenPage() {
                   {roomCode || "------"}
                 </strong>
               </div>
+              {process.env.NODE_ENV === "development" && (
+                <div>
+                  <Button
+                    variant="outline"
+                    className="mt-4 border-white/20 bg-white/[.06] text-white hover:bg-white/10 hover:text-white"
+                    onClick={() => {
+                      setPhotoSaveState({ status: "idle" });
+                      setPhotoTestOpen(true);
+                    }}
+                  >
+                    <Camera className="size-4" /> Test camera <kbd className="rounded border border-white/20 px-1.5 py-0.5 text-xs">J</kbd>
+                  </Button>
+                </div>
+              )}
             </div>
           </section>
           <section className="host-panel flex min-h-[380px] flex-col p-6">
@@ -1186,6 +1226,42 @@ export default function ScreenPage() {
           </section>
         </div>
         <TopTeams entries={leaderboard} />
+        {process.env.NODE_ENV === "development" && photoTestOpen && (
+          <div
+            className="fixed inset-0 z-[120] flex items-center justify-center overflow-y-auto bg-black/75 p-4"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setPhotoTestOpen(false);
+            }}
+          >
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-label="Test the team photo camera"
+              className="my-auto w-full max-w-5xl rounded-3xl bg-[#f4f8f5] p-4 text-[#17211c] shadow-2xl sm:p-6"
+            >
+              <div className="mb-4 flex items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-black sm:text-2xl">Camera test</h2>
+                  <p className="mt-1 text-sm text-[#5b7068]">
+                    This takes and saves a test photo without starting a game. Press Esc to close.
+                  </p>
+                </div>
+                <Button variant="outline" onClick={() => setPhotoTestOpen(false)}>
+                  Close
+                </Button>
+              </div>
+              <TeamCamera
+                key="photo-test"
+                language="en"
+                watermarkMode={ACTIVE_QUESTION_BANK}
+                saveState={photoSaveState}
+                onSave={saveTeamPhoto}
+                autoStart
+                autoSave
+              />
+            </section>
+          </div>
+        )}
         <CalibrationDot />
         <AirMouseCursors
           players={players}
@@ -1416,6 +1492,7 @@ export default function ScreenPage() {
                       : undefined
                   }
                   language={gameState.language}
+                  watermarkMode={ACTIVE_QUESTION_BANK}
                   saveState={photoSaveState}
                   onSave={saveTeamPhoto}
                   autoStart

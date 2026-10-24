@@ -5,6 +5,7 @@ import Image from "next/image";
 import { Camera, Check, Download, RotateCcw } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { Button } from "@/components/ui/button";
+import type { QuestionBankMode } from "@/lib/game/question-bank";
 import { MAX_TEAM_PHOTO_LENGTH } from "@/lib/realtime/leaderboard";
 
 export type PhotoSaveState = {
@@ -60,8 +61,8 @@ function loadWatermarkLogo() {
 }
 
 function encodePhotoWithinLimit(canvas: HTMLCanvasElement) {
-  const scales = [1, 0.85, 0.72, 0.61, 0.52, 0.44, 0.37];
-  const qualities = [0.82, 0.72, 0.62, 0.52, 0.42];
+  const scales = [1, 0.9, 0.8, 0.7, 0.6, 0.5];
+  const qualities = [0.92, 0.88, 0.84, 0.8, 0.76];
 
   for (const scale of scales) {
     const output = document.createElement("canvas");
@@ -84,6 +85,7 @@ function encodePhotoWithinLimit(canvas: HTMLCanvasElement) {
 export function TeamCamera({
   rank,
   language = "en",
+  watermarkMode,
   saveState,
   onSave,
   autoStart = false,
@@ -91,6 +93,7 @@ export function TeamCamera({
 }: {
   rank?: number;
   language?: "en" | "zh";
+  watermarkMode: QuestionBankMode;
   saveState: PhotoSaveState;
   onSave: (photo: string) => void;
   autoStart?: boolean;
@@ -170,27 +173,43 @@ export function TeamCamera({
       context.fillStyle = "#17211c";
       context.textBaseline = "middle";
       context.textAlign = "left";
-      context.font = `700 ${Math.max(11, Math.round(footerHeight * 0.18))}px system-ui, sans-serif`;
-      context.fillText(
-        "MRD 2026 亿师恩法会 2026",
-        watermarkX,
-        footerTop + footerHeight * 0.23,
-        watermarkWidth,
-      );
-      context.font = `700 ${Math.max(11, Math.round(footerHeight * 0.21))}px system-ui, sans-serif`;
-      context.fillText(
-        "Lamrim: Rely on Excellent Teachers",
-        watermarkX,
-        footerTop + footerHeight * 0.51,
-        watermarkWidth,
-      );
-      context.font = `700 ${Math.max(11, Math.round(footerHeight * 0.18))}px system-ui, sans-serif`;
-      context.fillText(
-        "广论亲近善知识",
-        watermarkX,
-        footerTop + footerHeight * 0.79,
-        watermarkWidth,
-      );
+      if (watermarkMode === "external") {
+        context.font = `700 ${Math.max(11, Math.round(footerHeight * 0.2))}px system-ui, sans-serif`;
+        context.fillText(
+          "Master Rememberance Day Exhibition 2026",
+          watermarkX,
+          footerTop + footerHeight * 0.37,
+          watermarkWidth,
+        );
+        context.fillText(
+          "忆师恩教育展 2026",
+          watermarkX,
+          footerTop + footerHeight * 0.7,
+          watermarkWidth,
+        );
+      } else {
+        context.font = `700 ${Math.max(11, Math.round(footerHeight * 0.18))}px system-ui, sans-serif`;
+        context.fillText(
+          "MRD 2026 亿师恩法会 2026",
+          watermarkX,
+          footerTop + footerHeight * 0.23,
+          watermarkWidth,
+        );
+        context.font = `700 ${Math.max(11, Math.round(footerHeight * 0.21))}px system-ui, sans-serif`;
+        context.fillText(
+          "Lamrim: Rely on Excellent Teachers",
+          watermarkX,
+          footerTop + footerHeight * 0.51,
+          watermarkWidth,
+        );
+        context.font = `700 ${Math.max(11, Math.round(footerHeight * 0.18))}px system-ui, sans-serif`;
+        context.fillText(
+          "广论亲近善知识",
+          watermarkX,
+          footerTop + footerHeight * 0.79,
+          watermarkWidth,
+        );
+      }
 
       const snapshot = encodePhotoWithinLimit(canvas);
       autoSaveRequestedRef.current = false;
@@ -204,7 +223,7 @@ export function TeamCamera({
     } finally {
       stopCamera();
     }
-  }, [stopCamera]);
+  }, [stopCamera, watermarkMode]);
 
   const startCountdown = useCallback(
     (request: number) => {
