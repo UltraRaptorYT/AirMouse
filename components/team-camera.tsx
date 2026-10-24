@@ -176,7 +176,7 @@ export function TeamCamera({
       if (watermarkMode === "external") {
         context.font = `700 ${Math.max(11, Math.round(footerHeight * 0.2))}px system-ui, sans-serif`;
         context.fillText(
-          "Master Rememberance Day Exhibition 2026",
+          "Master Remembrance Day Exhibition 2026",
           watermarkX,
           footerTop + footerHeight * 0.37,
           watermarkWidth,
