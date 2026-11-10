@@ -23,6 +23,8 @@ export type GameStatePayload = {
   questionCount: number;
   language?: GameLanguage;
   challenge?: ChallengeNumber;
+  /** UUID for a custom question loaded from Supabase. */
+  specialGameId?: string;
   challengeLabel?: string;
   memoriseText?: string;
   phaseEndsAt?: number;

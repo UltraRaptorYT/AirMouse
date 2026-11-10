@@ -31,6 +31,8 @@ import {
 } from "@/lib/game/question-bank";
 import { leaderboardUrl, rankTeams } from "@/lib/realtime/leaderboard";
 import {
+  defineChallenge,
+  makeQuestion,
   toPublicQuestion,
   type Challenge,
   type ChallengeNumber,
@@ -165,6 +167,11 @@ export default function ScreenPage() {
     status: "idle",
   });
   const [photoTestOpen, setPhotoTestOpen] = useState(false);
+  const [specialGameId, setSpecialGameId] = useState("");
+  const [specialGameStatus, setSpecialGameStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [specialGameError, setSpecialGameError] = useState("");
+  const [specialChallenge, setSpecialChallenge] = useState<Challenge | null>(null);
+  const specialChallengeRef = useRef<Challenge | null>(null);
   const photoRunRef = useRef<string | null>(null);
   // The id of the run this host submitted for the current finish, so we can highlight it and never double-submit.
   const [submittedRunId, setSubmittedRunId] = useState<string | null>(null);
@@ -302,6 +309,52 @@ export default function ScreenPage() {
   }, [openFreshRoom]);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("game");
+    if (!id) return;
+    void Promise.resolve()
+      .then(() => {
+        setSpecialGameId(id);
+        setSpecialGameStatus("loading");
+        return fetch(`/api/custom-games/${encodeURIComponent(id)}`, {
+          cache: "no-store",
+        });
+      })
+      .then(async (response) => {
+        const result = (await response.json()) as {
+          id?: string;
+          creator_name?: string;
+          label?: string;
+          language?: GameLanguage;
+          prompt?: string;
+          answers?: string[];
+          instruction?: string;
+          error?: string;
+        };
+        if (!response.ok || !result.id || !result.language || !result.prompt || !result.answers) {
+          throw new Error(result.error || "Could not load this custom game.");
+        }
+        const segment = makeQuestion(`${result.id}-segment`, result.prompt, result.answers, result.instruction || "Drag each phrase into its place.");
+        const passage = defineChallenge({
+          id: result.id,
+          language: result.language,
+          number: 0,
+          label: result.label || "Custom game",
+          source: `Created by ${result.creator_name || "Unknown"}`,
+          memoriseText: result.prompt.replace(/\[(\d+)\]/g, (_, number: string) => result.answers?.[Number(number) - 1] ?? ""),
+          segments: [segment],
+        });
+        specialChallengeRef.current = passage;
+        setSpecialChallenge(passage);
+        setSpecialGameStatus("ready");
+      })
+      .catch((loadError: unknown) => {
+        setSpecialGameError(loadError instanceof Error ? loadError.message : "Could not load this custom game.");
+        setSpecialGameStatus("error");
+      });
+  }, []);
+
+  useEffect(() => {
     if (gameState.phase !== "finished") return;
     const deadline =
       (gameState.completedAt ?? Date.now()) + RESULTS_SCREEN_TTL_MS;
@@ -325,8 +378,10 @@ export default function ScreenPage() {
 
   const startQuestion = useCallback(
     (index: number, state = gameStateRef.current) => {
-      if (!state.language || !state.challenge) return;
-      const challenge = getChallenge(state.language, state.challenge);
+      if (!state.language || (!state.specialGameId && !state.challenge)) return;
+      const challenge = state.specialGameId
+        ? specialChallengeRef.current
+        : getChallenge(state.language, state.challenge!);
       const question = challenge?.questions[index];
       if (!challenge || !question) return;
       clearRound();
@@ -334,6 +389,7 @@ export default function ScreenPage() {
         phase: "question",
         language: challenge.language,
         challenge: challenge.number,
+        specialGameId: state.specialGameId,
         challengeLabel: challenge.label,
         question: toPublicQuestion(question),
         questionIndex: index,
@@ -346,11 +402,12 @@ export default function ScreenPage() {
   );
 
   const startMemorise = useCallback(
-    (challenge: Challenge) => {
+    (challenge: Challenge, customGameId?: string) => {
       broadcastState({
         phase: "memorise",
         language: challenge.language,
         challenge: challenge.number,
+        specialGameId: customGameId,
         challengeLabel: challenge.label,
         memoriseText: challenge.memoriseText,
         questionIndex: 0,
@@ -486,7 +543,8 @@ export default function ScreenPage() {
 
     function applyHint(answerId: string) {
       const state = gameStateRef.current;
-      const activeQuestion = getQuestion(state.question?.id);
+      const activeQuestion = getQuestion(state.question?.id) ??
+        specialChallengeRef.current?.questions.find((question) => question.id === state.question?.id);
       if (state.phase !== "question" || !activeQuestion) return;
       const answer = activeQuestion.answers.find(
         (item) => item.id === answerId,
@@ -605,7 +663,8 @@ export default function ScreenPage() {
         const cursor =
           renderedCursorsRef.current[action.playerId] ??
           cursorsRef.current[action.playerId];
-        const activeQuestion = getQuestion(gameStateRef.current.question?.id);
+        const activeQuestion = getQuestion(gameStateRef.current.question?.id) ??
+          specialChallengeRef.current?.questions.find((question) => question.id === gameStateRef.current.question?.id);
         if (
           !answerId ||
           !cursor ||
@@ -765,21 +824,32 @@ export default function ScreenPage() {
       );
       setStartProgress(progress);
       if (progress === 1 && gameStateRef.current.phase === "lobby") {
-        broadcastState({
-          phase: "language",
-          questionIndex: 0,
-          questionCount: 0,
-        });
+        if (specialGameId) {
+          if (specialChallengeRef.current) {
+            startMemorise(specialChallengeRef.current, specialGameId);
+          } else {
+            startReadyAtRef.current = null;
+            setStartProgress(0);
+          }
+        } else {
+          broadcastState({
+            phase: "language",
+            questionIndex: 0,
+            questionCount: 0,
+          });
+        }
       }
     }, 100);
     return () => window.clearInterval(timer);
-  }, [broadcastState, gameState.phase]);
+  }, [broadcastState, gameState.phase, specialGameId, startMemorise]);
 
   useEffect(() => {
     selectionRef.current = null;
     selectionLockedRef.current = false;
-    setChoiceVotes({});
-    const clearDwellTimer = window.setTimeout(() => setDwell(null), 0);
+    const clearDwellTimer = window.setTimeout(() => {
+      setDwell(null);
+      setChoiceVotes({});
+    }, 0);
     if (gameState.phase !== "language" && gameState.phase !== "challenge") {
       return () => window.clearTimeout(clearDwellTimer);
     }
@@ -921,10 +991,11 @@ export default function ScreenPage() {
       ? Math.max(0, gameState.completedAt + RESULTS_SCREEN_TTL_MS - now)
       : RESULTS_SCREEN_TTL_MS;
 
-  // Push this team's time to the global leaderboard exactly once per finished run.
+  // Custom games are private UUID sessions and never enter the standard leaderboard.
   useEffect(() => {
     if (
       gameState.phase !== "finished" ||
+      gameState.specialGameId ||
       gameState.timedOut ||
       submittedRunId ||
       !gameState.startedAt ||
@@ -961,14 +1032,16 @@ export default function ScreenPage() {
     gameState.penaltyMs,
     gameState.phase,
     gameState.startedAt,
+    gameState.specialGameId,
     status,
     submittedRunId,
   ]);
 
   const currentChallengeId =
-    gameState.language && gameState.challenge
+    gameState.specialGameId ??
+    (gameState.language && gameState.challenge
       ? getChallenge(gameState.language, gameState.challenge)?.id
-      : undefined;
+      : undefined);
   const challengeLeaderboard = useMemo(
     () =>
       rankTeams(
@@ -1116,6 +1189,26 @@ export default function ScreenPage() {
                 Everyone joins, then moves their hand cursor into the start zone
                 together.
               </p>
+              {specialGameId && (
+                <div className="mt-5 max-w-xl rounded-2xl border border-[#44d79b]/25 bg-[#44d79b]/10 p-4 text-left">
+                  <strong className="block text-lg text-[#9cf1ca]">
+                    {specialGameStatus === "loading"
+                      ? "Loading your custom game…"
+                      : specialGameStatus === "ready"
+                        ? specialChallenge?.label
+                        : specialGameStatus === "error"
+                          ? "Custom game could not load"
+                          : "Custom game"}
+                  </strong>
+                  {specialGameStatus === "error" ? (
+                    <span className="mt-1 block text-sm text-red-200">{specialGameError}</span>
+                  ) : (
+                    <span className="mt-1 block text-sm text-white/55">
+                      {specialChallenge?.source ?? "This room will start this UUID game after everyone is ready."}
+                    </span>
+                  )}
+                </div>
+              )}
               <p
                 className="mt-2 max-w-xl text-lg leading-relaxed text-white/55"
                 lang="zh-Hans"
@@ -1449,7 +1542,13 @@ export default function ScreenPage() {
                     ? `最终用时包含提示增加的 ${Math.round((gameState.penaltyMs ?? 0) / 1_000)} 秒`
                     : `Final time includes +${Math.round((gameState.penaltyMs ?? 0) / 1_000)}s from hints`}
               </p>
-              {gameState.timedOut ? (
+              {gameState.specialGameId ? (
+                gameState.timedOut ? (
+                  <p className="mt-4 rounded-full bg-[#e56b35]/12 px-5 py-2 text-sm font-black text-[#a44a22]">
+                    {gameState.language === "zh" ? "自定义游戏时间已到。" : "Time limit reached for this custom game."}
+                  </p>
+                ) : null
+              ) : gameState.timedOut ? (
                 <p className="mt-4 rounded-full bg-[#e56b35]/12 px-5 py-2 text-sm font-black text-[#a44a22]">
                   {gameState.language === "zh"
                     ? "本次未完成挑战，成绩不会列入最快队伍。"
@@ -1560,6 +1659,7 @@ export default function ScreenPage() {
                 </div>
               ))}
             </div>
+            {!gameState.specialGameId && <>
             <div className="my-5 border-t border-white/10" />
             <div className="mb-3 flex items-center justify-between gap-2">
               <h3 className="text-lg font-black">
@@ -1575,6 +1675,7 @@ export default function ScreenPage() {
               language={gameState.language}
               className="min-h-0"
             />
+            </>}
           </section>
         </div>
       </HostShell>

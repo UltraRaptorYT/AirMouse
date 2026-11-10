@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
-import { ArrowLeft, ShieldAlert, Trash2 } from "lucide-react";
+import { ArrowLeft, FilePlus2, ShieldAlert, Trash2 } from "lucide-react";
 import { leaderboardUrl } from "@/lib/realtime/leaderboard";
 
 type ResetResult = {
@@ -63,6 +63,12 @@ export default function AdminPage() {
           className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-bold text-[#52645a] hover:bg-white"
         >
           <ArrowLeft className="size-4" /> Back to AirMouse
+        </Link>
+        <Link
+          href="/form"
+          className="ml-2 inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-bold text-[#24794d] hover:bg-white"
+        >
+          <FilePlus2 className="size-4" /> Create a question
         </Link>
 
         <section className="host-panel mt-5 p-6 sm:p-9">

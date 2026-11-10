@@ -67,6 +67,21 @@ memoriseText: String.raw`Opening line\br
 2) Second point`,
 ```
 
+### Custom games in Supabase
+
+Open `/form` and enter the admin password to reach the question builder. Set
+`SUPABASE_SECRET_KEY` and `ADMIN_PASSWORD` as server environment variables.
+Keep the Supabase secret key private and do not use the `NEXT_PUBLIC_` prefix.
+Custom game rows are stored in `public.airmouse_custom_games`; its migration is
+in `supabase/migrations`, and row level security is enabled with access limited
+to the server role.
+
+In the builder, paste the passage, select an answer phrase, and choose “Turn
+selected text into blank”. The selected phrase becomes a numbered blank and
+appears as its editable answer. Save to generate a private UUID game link at
+`/screen?game=...`. Standard games still use the original language and challenge
+selection.
+
 For motion testing on a physical phone, use the deployed HTTPS frontend and
 Worker. Mobile browsers generally require HTTPS to grant motion sensor access.
 

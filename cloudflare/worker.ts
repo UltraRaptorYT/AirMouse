@@ -183,6 +183,7 @@ function sanitizeLeaderboardEntry(value: unknown): LeaderboardEntry | null {
   if (
     typeof entry.id !== "string" ||
     typeof entry.challengeId !== "string" ||
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(entry.challengeId) ||
     typeof entry.challengeLabel !== "string" ||
     typeof entry.teamName !== "string" ||
     (entry.language !== "en" && entry.language !== "zh") ||
@@ -195,7 +196,7 @@ function sanitizeLeaderboardEntry(value: unknown): LeaderboardEntry | null {
 
   return {
     id: entry.id.slice(0, 64),
-    challengeId: entry.challengeId.slice(0, 32),
+    challengeId: entry.challengeId.slice(0, 64),
     challengeLabel: entry.challengeLabel.slice(0, 48),
     language: entry.language,
     teamName: entry.teamName.trim().replace(/\s+/g, " ").slice(0, 120) || "Anonymous team",
@@ -212,7 +213,9 @@ function sanitizeLeaderboardEntry(value: unknown): LeaderboardEntry | null {
  */
 export class Leaderboard extends DurableObject<Env> {
   async list(): Promise<LeaderboardEntry[]> {
-    return (await this.ctx.storage.get<LeaderboardEntry[]>("entries")) ?? [];
+    return ((await this.ctx.storage.get<LeaderboardEntry[]>("entries")) ?? []).filter(
+      (entry) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(entry.challengeId),
+    );
   }
 
   async getPhotoKey(runId: string): Promise<string | undefined> {
