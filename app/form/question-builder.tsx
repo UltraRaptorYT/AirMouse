@@ -49,6 +49,7 @@ export default function QuestionBuilder() {
   const [prompt, setPrompt] = useState("");
   const [answers, setAnswers] = useState<string[]>([]);
   const [selection, setSelection] = useState({ start: 0, end: 0, text: "" });
+  const [selectionMode, setSelectionMode] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState("");
   const [catalogGames, setCatalogGames] = useState<CatalogGame[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
@@ -57,7 +58,7 @@ export default function QuestionBuilder() {
   const [activeTab, setActiveTab] = useState<"catalogue" | "create">("catalogue");
   const creatorName = useSyncExternalStore(subscribeToPreferences, getSavedCreatorName, () => "");
   const language = useSyncExternalStore(subscribeToPreferences, getSavedLanguage, () => "en");
-  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const passagePreviewRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -90,20 +91,32 @@ export default function QuestionBuilder() {
     savePreference(LANGUAGE_STORAGE_KEY, value);
   }
 
-  function rememberSelection() {
-    const field = promptRef.current;
-    if (!field) return;
-    const start = field.selectionStart;
-    const end = field.selectionEnd;
-    setSelection({ start, end, text: field.value.slice(start, end) });
+  function rememberPreviewSelection() {
+    const host = passagePreviewRef.current;
+    const selected = window.getSelection();
+    if (!host || !selected || selected.isCollapsed || !selected.rangeCount) {
+      setSelection({ start: 0, end: 0, text: "" });
+      return;
+    }
+    const range = selected.getRangeAt(0);
+    if (!host.contains(range.startContainer) || !host.contains(range.endContainer)) return;
+    const prefix = document.createRange();
+    prefix.selectNodeContents(host);
+    prefix.setEnd(range.startContainer, range.startOffset);
+    const start = prefix.toString().length;
+    const text = range.toString();
+    setSelection({ start, end: start + text.length, text });
   }
 
   function makeBlank() {
     const phrase = selection.text.trim();
     if (!phrase || selection.start === selection.end) return;
+    const selectedText = prompt.slice(selection.start, selection.end);
+    const leadingWhitespace = selectedText.match(/^\s*/)?.[0] ?? "";
+    const trailingWhitespace = selectedText.match(/\s*$/)?.[0] ?? "";
     const before = prompt.slice(0, selection.start);
     const after = prompt.slice(selection.end);
-    const newPrompt = `${before}[[new-blank]]${after}`;
+    const newPrompt = `${before}${leadingWhitespace}[[new-blank]]${trailingWhitespace}${after}`;
     const oldAnswers = [...answers];
     let nextIndex = 0;
     const nextAnswers: string[] = [];
@@ -115,7 +128,6 @@ export default function QuestionBuilder() {
     setPrompt(numbered);
     setAnswers(nextAnswers);
     setSelection({ start: 0, end: 0, text: "" });
-    requestAnimationFrame(() => promptRef.current?.focus());
   }
 
   function removeBlank(index: number) {
@@ -233,21 +245,35 @@ export default function QuestionBuilder() {
         <section className="space-y-3">
           <div>
             <h2 className="text-base font-black">Question or passage</h2>
-            <p className="mt-1 text-sm leading-relaxed text-[#66736c]">Paste or type the full passage, select an answer phrase, then turn it into a blank. On a phone, touch and hold the phrase to select it.</p>
+            <p className="mt-1 text-sm leading-relaxed text-[#66736c]">{selectionMode ? "Select an answer phrase in the passage preview. On a phone, touch and hold the words." : "Paste or type the complete passage first, then move to the selection view."}</p>
           </div>
-          <textarea
-            ref={promptRef} value={prompt} onChange={(event) => setPrompt(event.target.value)}
-            onSelect={rememberSelection} onMouseUp={rememberSelection} onKeyUp={rememberSelection} onTouchEnd={rememberSelection}
-            maxLength={8000} rows={5} className={`${inputClass} min-h-48 resize-y leading-relaxed sm:min-h-64`}
-            placeholder="Paste the passage here. Select a phrase like 'shared memory' to create the first blank."
-            aria-label="Question or passage"
-          />
-          <div className="flex flex-wrap items-center gap-3">
-            <button type="button" onClick={makeBlank} disabled={!selection.text.trim()} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#e4f4eb] px-4 text-sm font-black text-[#1c633e] transition hover:bg-[#d2ebdc] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#24794d] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">
-              <Plus className="size-4" /> Turn selected text into blank
+          {!selectionMode ? <>
+            <textarea
+              value={prompt} onChange={(event) => setPrompt(event.target.value)}
+              maxLength={8000} rows={7} className={`${inputClass} min-h-56 resize-y leading-relaxed sm:min-h-72`}
+              placeholder="Paste or type the complete passage here."
+              aria-label="Question or passage"
+            />
+            <button type="button" onClick={() => { setSelection({ start: 0, end: 0, text: "" }); setSelectionMode(true); }} disabled={!prompt.trim()} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#24794d] px-4 text-sm font-black text-white transition hover:bg-[#1c633e] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#24794d] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">
+              <Plus className="size-4" /> Continue to phrase selection
             </button>
-            <span aria-live="polite" className="text-sm text-[#66736c]">{answers.length} {answers.length === 1 ? "blank" : "blanks"} added</span>
-          </div>
+          </> : <>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="text-sm font-bold text-[#52645a]">Select words below to make answer blanks.</span>
+              <button type="button" onClick={() => { setSelection({ start: 0, end: 0, text: "" }); setSelectionMode(false); }} className="inline-flex min-h-11 items-center rounded-xl px-3 text-sm font-bold text-[#52645a] hover:bg-[#edf4ef]">Edit passage text</button>
+            </div>
+            <div
+              ref={passagePreviewRef} role="region" aria-label="Passage preview. Select an answer phrase."
+              onMouseUp={rememberPreviewSelection} onKeyUp={rememberPreviewSelection} onTouchEnd={rememberPreviewSelection}
+              className="min-h-56 select-text whitespace-pre-wrap break-words rounded-2xl border border-black/10 bg-[#f7faf7] p-4 text-base leading-8 text-[#17211c] sm:min-h-72 sm:p-6 sm:text-lg"
+            >{prompt}</div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <button type="button" onClick={makeBlank} disabled={!selection.text.trim()} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#e4f4eb] px-4 text-sm font-black text-[#1c633e] transition hover:bg-[#d2ebdc] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#24794d] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">
+                <Plus className="size-4" /> Turn selected phrase into blank
+              </button>
+              <span aria-live="polite" className="text-sm text-[#66736c]">{answers.length} {answers.length === 1 ? "blank" : "blanks"} added</span>
+            </div>
+          </>}
         </section>
 
         {answers.length > 0 && <section className="space-y-3" aria-labelledby="answers-title">
