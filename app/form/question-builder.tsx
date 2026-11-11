@@ -300,7 +300,7 @@ export default function QuestionBuilder() {
           </div>
         </div>}
         <button type="submit" disabled={busy} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#24794d] px-5 font-black text-white transition hover:bg-[#1c633e] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#24794d] disabled:cursor-wait disabled:opacity-55">
-          <FilePlus2 className="size-4" /> {busy ? "Saving questionâ€¦" : "Save question and create game link"}
+          <FilePlus2 className="size-4" /> {busy ? "Saving question" : "Save question and create game link"}
         </button>
       </form>
 
