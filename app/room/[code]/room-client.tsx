@@ -671,6 +671,15 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
             {isChinese ? "将光标移入开始区域以开始" : "Hover to the start zone to begin"}
           </div>
 
+          <Button
+            variant="outline"
+            className="mt-4 h-auto min-h-12 rounded-2xl border-black/10 bg-white px-5 py-3 font-bold"
+            onClick={recenter}
+          >
+            <Crosshair className="mr-1 size-5 text-[#15a97b]" />
+            {isChinese ? "重新校准光标" : "Recenter cursor"}
+          </Button>
+
           {sensorStatus !== "active" && (
             <div className="mt-5 w-full max-w-sm rounded-2xl border border-amber-200 bg-amber-50 p-4 text-left text-amber-900">
               <div className="flex items-start gap-3">
@@ -746,16 +755,14 @@ export default function RoomClient({ roomCode }: { roomCode: string }) {
             {description}
           </p>
 
-          {!isMemorising && (
-            <Button
-              variant="outline"
-              className="mt-7 h-auto min-h-14 rounded-2xl border-black/10 bg-white px-6 py-3 text-lg font-bold"
-              onClick={recenter}
-            >
-              <Crosshair className="mr-1 size-5 text-[#15a97b]" />
-              {isChinese ? "重新校准光标" : "Recenter cursor"}
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            className="mt-7 h-auto min-h-14 rounded-2xl border-black/10 bg-white px-6 py-3 text-lg font-bold"
+            onClick={recenter}
+          >
+            <Crosshair className="mr-1 size-5 text-[#15a97b]" />
+            {isChinese ? "重新校准光标" : "Recenter cursor"}
+          </Button>
 
           <div className="mt-7 flex items-center gap-2 rounded-full border border-black/8 bg-white px-4 py-2.5 text-base font-semibold shadow-sm">
             <span
