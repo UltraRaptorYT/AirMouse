@@ -1191,7 +1191,7 @@ export default function ScreenPage() {
               </p>
               {specialGameId && (
                 <div className="mt-5 max-w-xl rounded-2xl border border-[#44d79b]/25 bg-[#44d79b]/10 p-4 text-left">
-                  <strong className="block text-lg text-[#9cf1ca]">
+                  <strong className="block text-lg text-[#00a558]">
                     {specialGameStatus === "loading"
                       ? "Loading your custom game…"
                       : specialGameStatus === "ready"
@@ -1318,7 +1318,9 @@ export default function ScreenPage() {
             </div>
           </section>
         </div>
-        <TopTeams entries={leaderboard} />
+        {!(specialGameId || gameState.specialGameId) && (
+          <TopTeams entries={leaderboard} />
+        )}
         {process.env.NODE_ENV === "development" && photoTestOpen && (
           <div
             className="fixed inset-0 z-[120] flex items-center justify-center overflow-y-auto bg-black/75 p-4"
